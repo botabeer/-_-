@@ -160,7 +160,42 @@ def handle_message(event):
     user_id = event.source.user_id
     display_name = line_bot_api.get_profile(user_id).display_name
 
+    # أمر المساعدة
+    if text == "مساعدة":
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(
+            text=(
+                "أوامر البوت:\n"
+                "ابدأ - لبدء أي لعبة\n"
+                "ايقاف - لإيقاف اللعبة الجارية\n"
+                "سؤال - اختيار سؤال عشوائي\n"
+                "تحدي - اختيار تحدي عشوائي\n"
+                "اعتراف - اختيار اعتراف عشوائي\n"
+                "شخصي - اختيار نصيحة شخصية عشوائية\n"
+                "لعبه1 إلى لعبه10 - للعب الألعاب المختلفة"
+            )
+        ))
+        return
+
     # بدء اللعبة
+    if text.startswith("ابدأ"):
+        game_name = text.split()[-1] if len(text.split()) > 1 else None
+        if game_name and game_name in games:
+            group_sessions[user_id] = {"game": game_name, "answers": [], "current_q":0}
+            first_q = games[game_name][0]
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                text=f"@{display_name} اختر رقم الإجابة لكل سؤال:\n{first_q}"
+            ))
+        return
+
+    # ايقاف اللعبة
+    if text == "ايقاف" and user_id in group_sessions:
+        del group_sessions[user_id]
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(
+            text=f"@{display_name} تم إيقاف اللعبة."
+        ))
+        return
+
+    # الألعاب مباشرة
     if text.startswith("لعبه") and text in games:
         group_sessions[user_id] = {"game": text, "answers": [], "current_q":0}
         first_q = games[text][0]
@@ -169,7 +204,7 @@ def handle_message(event):
         ))
         return
 
-    # اختيار إجابة
+    # التعامل مع اختيار الإجابة رقم
     if text.isdigit() and user_id in group_sessions:
         session = group_sessions[user_id]
         game_name = session["game"]
@@ -184,7 +219,7 @@ def handle_message(event):
             ))
         else:
             top_personality = calculate_personality(session["answers"], game_name)
-            description = next((p for p in personalities if p.startswith(top_personality)), "")
+            description = next((p for p in personalities if p.startswith(top_personality)), "شخصية غير محددة")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"@{display_name} لقد اكتملت اللعبة! شخصيتك هي: {top_personality}\n\n{description}"
             ))
