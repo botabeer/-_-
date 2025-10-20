@@ -6,7 +6,6 @@ import os, random, typing, json
 
 app = Flask(__name__)
 
-# إعداد التوكن والسر
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
@@ -15,7 +14,6 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# ======== تحميل الملفات ========
 def load_file_lines(filename: str) -> typing.List[str]:
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -42,51 +40,35 @@ try:
 except Exception:
     personalities = []
 
-# ======== إعداد أوزان الألعاب ========
 try:
     with open("game_weights.json", "r", encoding="utf-8") as f:
         game_weights = json.load(f)
 except Exception:
     game_weights = {}
 
-# ======== تتبع المواقع لكل مجموعة ========
-indexes = {
-    "questions": 0,
-    "challenges": 0,
-    "confessions": 0,
-    "personal": 0
-}
+indexes = {"questions": 0, "challenges": 0, "confessions": 0, "personal": 0}
 
-# ======== نقاط الشخصيات ========
-personality_scores = {p:0 for p in ["الاجتماعي","الرومانسي","القائد","المغامر",
-                                    "المفكر","المرح","المبدع","الهادئ","المتحمس","الحساس"]}
+personality_scores = {p: 0 for p in ["الاجتماعي", "الرومانسي", "القائد", "المغامر",
+                                    "المفكر", "المرح", "المبدع", "الهادئ", "المتحمس", "الحساس"]}
 
-# ======== جلسات المجموعات ========
 group_sessions = {}
 
-# ======== المساعد ========
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
 
-    if not signature:
-        return "Missing X-Line-Signature", 400
-
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
-        print("⚠️ Invalid signature. Check your CHANNEL_SECRET and make sure this request is from LINE.")
-        return "Invalid signature", 400
+        print("Invalid signature – check your CHANNEL_SECRET")
     except Exception as e:
-        print(f"⚠️ Exception handling webhook: {e}")
-        return str(e), 500
+        print(f"Webhook exception: {e}")
 
     return "OK", 200
 
-# ======== تحليل الشخصية ========
 def calculate_personality(user_answers: typing.List[int], game_name: str) -> str:
-    scores = {k:0 for k in personality_scores.keys()}
+    scores = {k: 0 for k in personality_scores.keys()}
     weights = game_weights.get(game_name, [])
     for i, answer in enumerate(user_answers):
         if i >= len(weights):
@@ -97,7 +79,6 @@ def calculate_personality(user_answers: typing.List[int], game_name: str) -> str
                 scores[key] += val
     return max(scores, key=scores.get)
 
-# ======== اختيار العنصر التالي مع تكرار دائري ========
 def get_next_item(category: str) -> str:
     global indexes
     items = {
@@ -115,76 +96,53 @@ def get_next_item(category: str) -> str:
     indexes[category] = (idx + 1) % len(items)
     return item
 
-# ======== التعامل مع الرسائل ========
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     text = event.message.text.strip()
     user_id = event.source.user_id
     display_name = line_bot_api.get_profile(user_id).display_name
 
-    # المساعدة
     if text == "مساعدة":
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text=(
-                "أوامر البوت:\n"
-                "ابدأ - لبدء أي لعبة\n"
-                "ايقاف - لإيقاف اللعبة الجارية\n"
-                "سؤال - اختيار سؤال عشوائي من الأسئلة العامة\n"
-                "تحدي - اختيار تحدي عشوائي\n"
-                "اعتراف - اختيار اعتراف عشوائي\n"
-                "شخصي - اختيار سؤال شخصي عشوائي\n"
-                "لعبه - اختيار لعبة عشوائية من الألعاب العشر"
-            )
-        ))
+        reply = (
+            "أوامر البوت:\n"
+            "ابدأ - لبدء أي لعبة\n"
+            "ايقاف - لإيقاف اللعبة الجارية\n"
+            "سؤال - اختيار سؤال من الأسئلة العامة\n"
+            "تحدي - اختيار تحدي\n"
+            "اعتراف - اختيار اعتراف\n"
+            "شخصي - اختيار سؤال شخصي\n"
+            "لعبه - اختيار لعبة عشوائية من الألعاب العشر"
+        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # اختيار سؤال عام
     if text == "سؤال":
-        item = get_next_item("questions")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text=f"{display_name}: {item}"
-        ))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {get_next_item('questions')}"))
         return
 
-    # اختيار تحدي
     if text == "تحدي":
-        item = get_next_item("challenges")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text=f"{display_name}: {item}"
-        ))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {get_next_item('challenges')}"))
         return
 
-    # اختيار اعتراف
     if text == "اعتراف":
-        item = get_next_item("confessions")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text=f"{display_name}: {item}"
-        ))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {get_next_item('confessions')}"))
         return
 
-    # اختيار سؤال شخصي
     if text == "شخصي":
-        item = get_next_item("personal")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text=f"{display_name}: {item}"
-        ))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {get_next_item('personal')}"))
         return
 
-    # اختيار لعبة عشوائية
-    if text.startswith("لعبه"):
+    if text == "لعبه":
         available_games = list(games.keys())[:10]
-        chosen_game = random.choice(available_games)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text=f"{display_name}: تم اختيار اللعبة -> {chosen_game}"
-        ))
+        if not available_games:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="لا توجد ألعاب متاحة."))
+        else:
+            chosen_game = random.choice(available_games)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: تم اختيار اللعبة -> {chosen_game}"))
         return
 
-    # أي رسالة أخرى
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(
-        text="❌ لم أفهم الأمر، اكتب 'مساعدة' لمعرفة الأوامر."
-    ))
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="اكتب 'مساعدة' لمعرفة الأوامر."))
 
-# ======== تشغيل السيرفر ========
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
