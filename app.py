@@ -22,9 +22,13 @@ def load_json_file(filename: str) -> dict:
     except Exception:
         return {}
 
-games_data = load_json_file("games.txt")           # ألعاب 1-10
-characters_data = load_json_file("characters.txt") # أوصاف الشخصيات
-game_weights = load_json_file("game_weights.json") # أوزان الشخصيات لكل إجابة
+games_data = load_json_file("games.txt")           
+questions_list = load_json_file("questions.txt")   
+challenges_list = load_json_file("challenges.txt") 
+confessions_list = load_json_file("confessions.txt") 
+personality_list = load_json_file("personality.txt") 
+characters_data = load_json_file("characters.txt") 
+game_weights = load_json_file("game_weights.json") 
 
 # جلسات اللاعبين الفردية
 sessions = {}
@@ -56,9 +60,34 @@ def calculate_personality(user_answers: typing.List[int], game_id: str) -> str:
                 scores[key] += val
     return max(scores, key=scores.get)
 
+# الحصول على قائمة الأسئلة حسب نوع اللعبة
+def get_questions_by_type(qtype: str) -> list:
+    if qtype == "سؤال":
+        return questions_list
+    elif qtype == "تحدي":
+        return challenges_list
+    elif qtype == "اعتراف":
+        return confessions_list
+    elif qtype == "شخصي":
+        return personality_list
+    return []
+
+# توليد نص السؤال مرقم
+def format_question(index: int, question_text: str) -> str:
+    lines = question_text.split("\n")
+    question_line = f"السؤال {index+1}:\n{lines[0]}"
+    options = "\n".join(lines[1:]) if len(lines) > 1 else ""
+    return f"{question_line}\n{options}"
+
+# تحويل الأرقام العربية ١–٤ إلى 1–4
+def normalize_answer(ans: str) -> str:
+    arabic_to_eng = {"١":"1","٢":"2","٣":"3","٤":"4"}
+    return arabic_to_eng.get(ans, ans)
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     text = event.message.text.strip()
+    text = normalize_answer(text)
     user_id = event.source.user_id
     display_name = line_bot_api.get_profile(user_id).display_name
     group_id = getattr(event.source, 'group_id', None)
@@ -66,16 +95,13 @@ def handle_message(event):
     # عرض قائمة الألعاب
     if text == "لعبه":
         games_list = "\n".join([f"لعبه{i}" for i in range(1, 11)])
-        reply_text = f"اختر اللعبة بكتابة اسمها:\n{games_list}\n\nابدأ - الانضمام للعبة الحالية\nإيقاف - إنهاء اللعبة الحالية"
+        reply_text = f"اختر اللعبة بكتابة اسمها:\n{games_list}\n\nابدأ - الانضمام للعبة الحالية\nإيقاف - إنهاء اللعبة الحالية\nأوامر: سؤال، تحدي، اعتراف، شخصي"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
 
     # اختيار لعبة محددة للقروب
     if group_id and text in games_data.keys():
-        group_sessions[group_id] = {
-            "game_id": text,
-            "players": {}
-        }
+        group_sessions[group_id] = {"game_id": text, "players": {}}
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"تم اختيار {text} للعب الجماعي. كل شخص يكتب 'ابدأ' للانضمام."))
         return
 
@@ -89,11 +115,11 @@ def handle_message(event):
         players = gs["players"]
         if user_id not in players:
             players[user_id] = {"step": 0, "answers": []}
-        step = players[user_id]["step"]
-        question_list = games_data[game_id]
-        if step < len(question_list):
-            question = question_list[step]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question}"))
+        player = players[user_id]
+        q_list = games_data[game_id]
+        if player["step"] < len(q_list):
+            question_text = format_question(player["step"], q_list[player["step"]])
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         return
 
     # إنهاء اللعبة
@@ -112,7 +138,7 @@ def handle_message(event):
         if user_id not in players:
             return
         if text not in ["1","2","3","4"]:
-            return  # فقط 1-4 مقبولة
+            return
         player = players[user_id]
         player["answers"].append(int(text))
         player["step"] += 1
@@ -120,8 +146,8 @@ def handle_message(event):
         q_list = games_data[game_id]
 
         if player["step"] < len(q_list):
-            next_q = q_list[player["step"]]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_q}"))
+            question_text = format_question(player["step"], q_list[player["step"]])
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         else:
             result = calculate_personality(player["answers"], game_id)
             description = characters_data.get(result, "وصف الشخصية غير متوفر.")
@@ -131,21 +157,30 @@ def handle_message(event):
             del players[user_id]
         return
 
-    # التحقق من الجلسة الفردية (خارج القروب)
+    # أوامر اللعبة الفردية: سؤال، تحدي، اعتراف، شخصي
+    if text in ["سؤال","تحدي","اعتراف","شخصي"]:
+        questions = get_questions_by_type(text)
+        if not questions:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: لا توجد أسئلة من نوع {text} حالياً."))
+            return
+        sessions[user_id] = {"step": 0, "answers": [], "questions": questions}
+        question_text = format_question(0, questions[0])
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
+        return
+
+    # الرد على الأسئلة الفردية
     if user_id in sessions:
         session = sessions[user_id]
-        game_id = session["game_id"]
-        q_list = games_data[game_id]
         if text not in ["1","2","3","4"]:
             return
         session["answers"].append(int(text))
-        session["current_index"] += 1
-
-        if session["current_index"] < len(q_list):
-            next_q = q_list[session["current_index"]]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_q}"))
+        session["step"] += 1
+        if session["step"] < len(session["questions"]):
+            question_text = format_question(session["step"], session["questions"][session["step"]])
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         else:
-            result = calculate_personality(session["answers"], game_id)
+            # حساب وتحليل الشخصية بعد آخر سؤال
+            result = calculate_personality(session["answers"], "default")
             description = characters_data.get(result, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({result}):\n{description}"
