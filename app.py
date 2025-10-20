@@ -29,33 +29,16 @@ def load_json_file(filename: str) -> dict:
     except Exception:
         return {}
 
-# ملفات الأسئلة
-questions = load_file_lines("questions.txt")
-challenges = load_file_lines("challenges.txt")
-confessions = load_file_lines("confessions.txt")
-personal_questions = load_file_lines("personality.txt")  # أسئلة شخصية
-
-# شخصيات ووصفها
-personality_descriptions = {}
-try:
-    with open("characters.txt", "r", encoding="utf-8") as f:
-        parts = f.read().split("\n\n")
-        for part in parts:
-            if not part.strip():
-                continue
-            key, _, desc = part.partition("\n")
-            personality_descriptions[key.strip()] = desc.strip()
-except Exception:
-    personality_descriptions = {}
-
-# أوزان الإجابات لكل لعبة
+questions_file = load_file_lines("questions.txt")
+challenges_file = load_file_lines("challenges.txt")
+confessions_file = load_file_lines("confessions.txt")
+personal_file = load_file_lines("personality.txt")
+games_file = load_file_lines("games.txt")  # كل الألعاب متوفرة هنا
+personality_descriptions = load_json_file("characters.txt")
 game_weights = load_json_file("game_weights.json")
 
-# الأسئلة من ملف الألعاب
-games = load_json_file("games.txt")  # {"لعبه1": ["سؤال1","سؤال2",...]}
-
-# جلسات اللاعبين
-sessions = {}
+# جلسات المستخدمين
+sessions: typing.Dict[str, dict] = {}
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -81,90 +64,101 @@ def calculate_personality(user_answers: typing.List[int], game_id: str) -> str:
                 scores[key] += val
     return max(scores, key=scores.get)
 
-def get_next_item(category: str) -> str:
-    items = {
-        "سؤال": questions,
-        "تحدي": challenges,
-        "اعتراف": confessions,
-        "شخصي": personal_questions
-    }.get(category, [])
-    if not items:
-        return "لا توجد عناصر متاحة."
-    return random.choice(items)
+def format_question(player_name: str, q_index: int, question_text: str) -> str:
+    return f"{player_name}\n\nالسؤال {q_index+1}:\n{question_text}"
+
+def format_analysis(player_name: str, trait: str) -> str:
+    description = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
+    return f"{player_name}\n\nتحليل شخصيتك ({trait}):\n{description}"
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     text = event.message.text.strip()
     user_id = event.source.user_id
-    try:
-        display_name = line_bot_api.get_profile(user_id).display_name
-    except Exception:
-        display_name = "عضو"
+    display_name = line_bot_api.get_profile(user_id).display_name
 
-    # دعم الأرقام بالعربي والانجليزي
     arabic_to_english = {"١": "1", "٢": "2", "٣": "3", "٤": "4"}
-    if text in arabic_to_english:
-        text = arabic_to_english[text]
+    answer_text = arabic_to_english.get(text, text)
 
-    # أوامر الأسئلة
-    if text in ["سؤال", "تحدي", "اعتراف", "شخصي"]:
-        item = get_next_item(text)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {item}"))
+    # أوامر عامة
+    if text == "مساعدة":
+        reply = (
+            "أوامر البوت:\n"
+            "سؤال - اختيار سؤال من الأسئلة العامة\n"
+            "تحدي - اختيار تحدي\n"
+            "اعتراف - اختيار اعتراف\n"
+            "شخصي - اختيار سؤال شخصي\n"
+            "لعبه - بدء لعبة من قائمة الألعاب\n"
+            "ايقاف - لإيقاف اللعبة الجارية"
+        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # عرض قائمة الألعاب عند كتابة "لعبه"
-    if text == "لعبه":
-        if not games:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: لا توجد ألعاب متاحة."))
+    if text == "ايقاف":
+        if user_id in sessions:
+            del sessions[user_id]
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: تم إيقاف اللعبة."))
+        else:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="لا توجد لعبة جارية لإيقافها."))
+        return
+
+    if text == "سؤال":
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=format_question(display_name, 0, random.choice(questions_file))))
+        return
+
+    if text == "تحدي":
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=format_question(display_name, 0, random.choice(challenges_file))))
+        return
+
+    if text == "اعتراف":
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=format_question(display_name, 0, random.choice(confessions_file))))
+        return
+
+    if text == "شخصي":
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=format_question(display_name, 0, random.choice(personal_file))))
+        return
+
+    # بدء اللعبة
+    if text.startswith("لعبه"):
+        if text not in games_file:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="اختر اللعبة بكتابة اسمها:\n" + "\n".join(games_file)))
             return
-        game_list = "\n".join(games.keys())
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text=f"{display_name}: اختر اللعبة بكتابة اسمها:\n{game_list}"
-        ))
-        return
-
-    # بدء اللعبة بعد اختيار الاسم
-    if text in games:
         sessions[user_id] = {
             "current_index": 0,
             "answers": [],
-            "game_id": text,
-            "questions": games[text]
+            "game_id": text
         }
-        first_question = sessions[user_id]["questions"][0]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {first_question}"))
+        first_question = load_file_lines(f"{text}.txt")
+        if not first_question:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="لا توجد أسئلة متاحة لهذه اللعبة."))
+            return
+        sessions[user_id]["questions"] = first_question
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=format_question(display_name, 0, first_question[0])))
         return
 
-    # إنهاء اللعبة
-    if text.lower() == "ايقاف" and user_id in sessions:
-        del sessions[user_id]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: تم إيقاف اللعبة."))
-        return
-
-    # الرد أثناء اللعبة
+    # إذا اللاعب في جلسة
     if user_id in sessions:
         session = sessions[user_id]
-        if text not in ["1", "2", "3", "4"]:
+        if answer_text not in ["1", "2", "3", "4"]:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="الرجاء اختيار رقم من 1 إلى 4"))
             return
-        answer = int(text)
+        answer = int(answer_text)
         session["answers"].append(answer)
         session["current_index"] += 1
 
         if session["current_index"] < len(session["questions"]):
             next_q = session["questions"][session["current_index"]]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {next_q}"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=format_question(display_name, session["current_index"], next_q)))
         else:
-            game_id = session["game_id"]
-            result = calculate_personality(session["answers"], game_id)
-            description = personality_descriptions.get(result, "وصف الشخصية غير متوفر.")
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(
-                    text=f"{display_name}: تم الانتهاء من اللعبة.\n{display_name} -> تحليل شخصيتك: {result}\n{description}"
-                )
-            )
+            # انتهاء اللعبة وحساب الشخصية
+            result = calculate_personality(session["answers"], session["game_id"])
+            analysis_text = format_analysis(display_name, result)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=analysis_text))
             del sessions[user_id]
         return
+
+    # أي رسالة أخرى يتم تجاهلها
+    return
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
