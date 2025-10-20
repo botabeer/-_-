@@ -130,7 +130,8 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="لا توجد ألعاب متاحة."))
             return
 
-        chosen_game = available_games[0]  # يمكن تغييره إلى random.choice(available_games)
+        # اختيار اللعبة عشوائيًا
+        chosen_game = random.choice(available_games)
         group_sessions[user_id] = {
             "game_started": True,
             "game_name": chosen_game,
@@ -143,7 +144,7 @@ def handle_message(event):
             text=f"{display_name}: تم بدء اللعبة -> {chosen_game}"
         ))
 
-        # إرسال أول سؤال/خيار من اللعبة
+        # إرسال أول سؤال مع اسم المستخدم
         game_questions = games.get(chosen_game, [])
         if game_questions:
             first_question = game_questions[0]
@@ -163,7 +164,7 @@ def handle_message(event):
         session["answers"].append(text)
         session["current_index"] += 1
 
-        # إذا بقيت أسئلة، إرسال السؤال التالي
+        # إذا بقيت أسئلة، إرسال السؤال التالي مع اسم المستخدم
         if session["current_index"] < len(game_questions):
             next_question = game_questions[session["current_index"]]
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
@@ -172,9 +173,20 @@ def handle_message(event):
             return
 
         # بعد انتهاء جميع الأسئلة، حساب التحليل الشخصي
-        personality_result = calculate_personality(session["answers"], chosen_game)
+        personality_name = calculate_personality(session["answers"], chosen_game)
+
+        # البحث عن وصف الشخصية
+        description = ""
+        for block in personalities:
+            lines = block.strip().split("\n")
+            if lines and lines[0] == personality_name:
+                description = "\n".join(lines[1:]).strip()
+                break
+        if not description:
+            description = "وصف الشخصية غير متوفر."
+
         line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text=f"{display_name}: تم الانتهاء من اللعبة. تحليل شخصيتك -> {personality_result}"
+            text=f"{display_name}: تم الانتهاء من اللعبة.\nتحليل شخصيتك -> {personality_name}\n{description}"
         ))
 
         # إنهاء الجلسة
@@ -207,7 +219,6 @@ def handle_message(event):
         return
 
     # أي نص آخر يتم تجاهله الآن
-    # البوت لن يرسل أي رد على رسائل غير الأوامر
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
