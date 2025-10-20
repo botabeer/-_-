@@ -105,8 +105,7 @@ def handle_message(event):
             "اعتراف → عرض اعتراف\n"
             "شخصي  → عرض سؤال شخصي\n"
             "لعبه  → عرض قائمة الألعاب المتاحة (لعبه1 → لعبه10)\n"
-            "ابدأ  → الانضمام للعبة الحالية في القروب\n"
-            "إيقاف → إنهاء اللعبة الحالية"
+            "ابدأ  → الانضمام للعبة الحالية في القروب"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
@@ -124,7 +123,7 @@ def handle_message(event):
     # عرض قائمة الألعاب
     if text == "لعبه":
         reply = "اختر اللعبة بكتابة اسمها:\n" + "\n".join([f"لعبه{i}" for i in range(1,11)])
-        reply += "\n\nابدأ - الانضمام للعبة الحالية\nإيقاف - إنهاء اللعبة الحالية"
+        reply += "\n\nابدأ - الانضمام للعبة الحالية"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
@@ -169,7 +168,7 @@ def handle_message(event):
         q_list = games_data[game_id]
 
         # بعد آخر سؤال مباشرة
-        if player["step"] >= len(q_list)-1:   # التعديل هنا
+        if player["step"] >= len(q_list)-1:
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
@@ -192,7 +191,7 @@ def handle_message(event):
         session["answers"].append(int(text_conv))
 
         # بعد آخر سؤال مباشرة
-        if session["step"] >= len(session["questions"]) - 1:   # التعديل هنا
+        if session["step"] >= len(session["questions"]) - 1:
             trait = calculate_personality(session["answers"], "default")
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
@@ -203,15 +202,6 @@ def handle_message(event):
             session["step"] += 1
             q_text = format_question(session["step"], session["questions"][session["step"]])
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
-        return
-
-    # إنهاء اللعبة
-    if text == "إيقاف":
-        if group_id and group_id in group_sessions:
-            del group_sessions[group_id]
-        if user_id in sessions:
-            del sessions[user_id]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="تم إنهاء اللعبة الحالية."))
         return
 
 if __name__ == "__main__":
