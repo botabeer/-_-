@@ -2,7 +2,7 @@ from flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os, random, typing, json
+import os, typing, json
 
 app = Flask(__name__)
 
@@ -34,16 +34,16 @@ questions = load_file_lines("questions.txt")
 challenges = load_file_lines("challenges.txt")
 confessions = load_file_lines("confessions.txt")
 personal_questions = load_file_lines("personality.txt")
-games_data = load_json_file("games.txt")  # أسئلة الألعاب بصيغة JSON
-personality_descriptions = load_json_file("characters.json")
-game_weights = load_json_file("game_weights.json")
+games_data = load_json_file("games.txt")  # أسئلة الألعاب
+personality_descriptions = load_json_file("characters.json")  # وصف الشخصيات
+game_weights = load_json_file("game_weights.json")  # أوزان الشخصية
 
 # جلسات اللاعبين الفردية والجماعية
 sessions = {}
 group_sessions = {}
 
-# تتبع ترتيب أسئلة السؤال/تحدي/اعتراف/شخصي لكل مستخدم لتجنب التكرار
-user_question_index = {}
+# تتبع ترتيب الأسئلة لتجنب التكرار
+question_indexes = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -77,18 +77,14 @@ def format_question(index: int, question_text: str) -> str:
     options = "\n".join(lines[1:]) if len(lines) > 1 else ""
     return f"{question_line}\n{options}"
 
-# الحصول على أسئلة حسب النوع مع ترتيب دائري
-def get_next_question(user_id: str, qtype: str) -> str:
-    qlist = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}.get(qtype, [])
-    if not qlist:
+# الحصول على سؤال حسب النوع بالترتيب وتجنب التكرار
+def get_next_question(qtype: str) -> str:
+    q_list = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}.get(qtype, [])
+    if not q_list:
         return "لا توجد أسئلة حالياً."
-    idx = user_question_index.get(user_id, {}).get(qtype, 0)
-    question = qlist[idx % len(qlist)]
-    # تحديث الفهرس
-    if user_id not in user_question_index:
-        user_question_index[user_id] = {}
-    user_question_index[user_id][qtype] = idx + 1
-    return question
+    idx = question_indexes[qtype]
+    question_indexes[qtype] = (idx + 1) % len(q_list)
+    return q_list[idx]
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -115,16 +111,20 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # أسئلة عامة (سؤال/تحدي/اعتراف/شخصي)
+    # أسئلة عامة
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
-        question_text = get_next_question(user_id, text)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
+        question_text = get_next_question(text)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{text}: {question_text}"))
         return
 
     # عرض قائمة الألعاب
     if text == "لعبه":
-        reply = "اختر اللعبة بكتابة اسمها:\n" + "\n".join([f"لعبه{i}" for i in range(1,11)])
-        reply += "\n\nابدأ - الانضمام للعبة الحالية\nإيقاف - إنهاء اللعبة الحالية"
+        reply = (
+            "اختر اللعبة بكتابة اسمها:\n"
+            "لعبه1\nلعبه2\nلعبه3\nلعبه4\nلعبه5\nلعبه6\nلعبه7\nلعبه8\nلعبه9\nلعبه10\n\n"
+            "ابدأ - الانضمام للعبة الحالية\n"
+            "إيقاف - إنهاء اللعبة الحالية"
+        )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
@@ -172,6 +172,7 @@ def handle_message(event):
             question_text = format_question(player["step"], q_list[player["step"]])
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         else:
+            # بعد آخر سؤال مباشرة، نحسب الشخصية ونرسل التحليل
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
