@@ -42,8 +42,8 @@ game_weights = load_json_file("game_weights.json")
 sessions = {}
 group_sessions = {}
 
-# عدادات الأسئلة لكل نوع لتجنب التكرار
-question_counters = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
+# تتبع ترتيب أسئلة السؤال/تحدي/اعتراف/شخصي لكل مستخدم لتجنب التكرار
+user_question_index = {}
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -77,14 +77,18 @@ def format_question(index: int, question_text: str) -> str:
     options = "\n".join(lines[1:]) if len(lines) > 1 else ""
     return f"{question_line}\n{options}"
 
-# الحصول على أسئلة حسب النوع مع التكرار
-def get_next_question(qtype: str) -> str:
-    global question_counters
-    qlist = {"سؤال":questions,"تحدي":challenges,"اعتراف":confessions,"شخصي":personal_questions}.get(qtype,[])
-    if not qlist: return "لا توجد أسئلة حالياً."
-    idx = question_counters[qtype] % len(qlist)
-    question_counters[qtype] += 1
-    return qlist[idx]
+# الحصول على أسئلة حسب النوع مع ترتيب دائري
+def get_next_question(user_id: str, qtype: str) -> str:
+    qlist = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}.get(qtype, [])
+    if not qlist:
+        return "لا توجد أسئلة حالياً."
+    idx = user_question_index.get(user_id, {}).get(qtype, 0)
+    question = qlist[idx % len(qlist)]
+    # تحديث الفهرس
+    if user_id not in user_question_index:
+        user_question_index[user_id] = {}
+    user_question_index[user_id][qtype] = idx + 1
+    return question
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -104,27 +108,23 @@ def handle_message(event):
             "تحدي  → عرض تحدي\n"
             "اعتراف → عرض اعتراف\n"
             "شخصي  → عرض سؤال شخصي\n"
-            "لعبه  → عرض قائمة الألعاب المتاحة\n"
+            "لعبه  → عرض قائمة الألعاب المتاحة (لعبه1 → لعبه10)\n"
             "ابدأ  → الانضمام للعبة الحالية في القروب\n"
             "إيقاف → إنهاء اللعبة الحالية"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # أسئلة عامة
+    # أسئلة عامة (سؤال/تحدي/اعتراف/شخصي)
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
-        q_text = get_next_question(text)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
+        question_text = get_next_question(user_id, text)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         return
 
     # عرض قائمة الألعاب
     if text == "لعبه":
-        reply = (
-            "اختر اللعبة بكتابة اسمها:\n"
-            "لعبه1\nلعبه2\nلعبه3\nلعبه4\nلعبه5\nلعبه6\nلعبه7\nلعبه8\nلعبه9\nلعبه10\n\n"
-            "ابدأ - الانضمام للعبة الحالية\n"
-            "إيقاف - إنهاء اللعبة الحالية"
-        )
+        reply = "اختر اللعبة بكتابة اسمها:\n" + "\n".join([f"لعبه{i}" for i in range(1,11)])
+        reply += "\n\nابدأ - الانضمام للعبة الحالية\nإيقاف - إنهاء اللعبة الحالية"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
@@ -172,14 +172,31 @@ def handle_message(event):
             question_text = format_question(player["step"], q_list[player["step"]])
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         else:
-            # بعد آخر سؤال مباشرة حساب الشخصية
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
-            # إزالة اللاعب من الجلسة
             del gs["players"][user_id]
+        return
+
+    # الرد على أسئلة الألعاب الفردية
+    if user_id in sessions:
+        session = sessions[user_id]
+        if text_conv not in ["1","2","3","4"]:
+            return
+        session["answers"].append(int(text_conv))
+        session["step"] += 1
+        if session["step"] < len(session["questions"]):
+            q_text = format_question(session["step"], session["questions"][session["step"]])
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
+        else:
+            trait = calculate_personality(session["answers"], "default")
+            desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
+            ))
+            del sessions[user_id]
         return
 
     # إنهاء اللعبة
