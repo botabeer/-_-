@@ -14,9 +14,6 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# =========================
-# تحميل الملفات
-# =========================
 def load_file_lines(filename: str) -> typing.List[str]:
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -43,7 +40,7 @@ try:
 except Exception:
     personalities_text = ""
 
-# استخراج وصف الشخصية
+# استخراج وصف الشخصية من الملف
 personality_descriptions = {}
 for part in personalities_text.split("\n\n"):
     if not part.strip():
@@ -56,33 +53,50 @@ indexes = {"questions": 0, "challenges": 0, "confessions": 0, "personal": 0}
 # جلسات المستخدمين أثناء اللعب
 sessions = {}
 
-# =========================
-# تخزين أسماء اللاعبين حسب المجموعة
-# =========================
-group_players: typing.Dict[str, typing.Dict[str, str]] = {}
+# -----------------------------
+# هيكل لتخزين أسماء اللاعبين لكل مجموعة
+# group_players[group_id] = { user_id: "اسم اللاعب" }
+# -----------------------------
+group_players = {}
 
-def register_or_update_player_name(group_id: str, user_id: str) -> str:
+def register_player_name(group_id: str, user_id: str) -> str:
     """
-    يسجل اسم اللاعب لأول مرة أو يحدثه إذا تغيّر في LINE.
+    يسجل اسم اللاعب في القروب باستخدام LINE API عند أول تفاعل.
+    يعيد الاسم المسجل أو 'عضو' كافتراضي.
     """
     if group_id not in group_players:
         group_players[group_id] = {}
+    if user_id in group_players[group_id]:
+        return group_players[group_id][user_id]
 
     try:
         profile = line_bot_api.get_profile(user_id)
-        current_name = profile.display_name
+        name = profile.display_name
     except:
-        current_name = "عضو"
+        name = "عضو"
+    group_players[group_id][user_id] = name
+    return name
 
-    # إذا الاسم مختلف عن المسجل، حدثه
-    if user_id not in group_players[group_id] or group_players[group_id][user_id] != current_name:
-        group_players[group_id][user_id] = current_name
+def get_player_name(group_id: str, user_id: str) -> str:
+    """
+    يعيد اسم اللاعب المسجل في القروب أو 'عضو' إذا لم يكن مسجلاً.
+    """
+    return group_players.get(group_id, {}).get(user_id, "عضو")
 
-    return group_players[group_id][user_id]
+@app.route("/callback", methods=["POST"])
+def callback():
+    signature = request.headers.get("X-Line-Signature", "")
+    body = request.get_data(as_text=True)
 
-# =========================
-# دوال مساعدة
-# =========================
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        print("Invalid signature – check your CHANNEL_SECRET")
+    except Exception as e:
+        print(f"Webhook exception: {e}")
+
+    return "OK", 200
+
 def calculate_personality(user_answers: typing.List[int], game_name: str) -> str:
     scores = {k: 0 for k in personality_descriptions.keys()}
     weights = games.get(game_name, [])
@@ -112,32 +126,12 @@ def get_next_item(category: str) -> str:
     indexes[category] = (idx + 1) % len(items)
     return item
 
-# =========================
-# مسار Webhook
-# =========================
-@app.route("/callback", methods=["POST"])
-def callback():
-    signature = request.headers.get("X-Line-Signature", "")
-    body = request.get_data(as_text=True)
-
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        print("Invalid signature – check your CHANNEL_SECRET")
-    except Exception as e:
-        print(f"Webhook exception: {e}")
-
-    return "OK", 200
-
-# =========================
-# التعامل مع الرسائل
-# =========================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     text = event.message.text.strip()
     user_id = event.source.user_id
-    group_id = getattr(event.source, 'group_id', user_id)  # إذا كانت رسالة فردية، نستخدم user_id كمفتاح
-    display_name = register_or_update_player_name(group_id, user_id)
+    group_id = event.source.group_id if hasattr(event.source, "group_id") else user_id
+    display_name = register_player_name(group_id, user_id)
 
     arabic_to_english = {"١": "1", "٢": "2", "٣": "3", "٤": "4"}
 
@@ -145,6 +139,7 @@ def handle_message(event):
     if user_id in sessions:
         text_conv = arabic_to_english.get(text, text)
         if text_conv not in ["1", "2", "3", "4"]:
+            # تجاهل أي رد غير صحيح
             return
 
         answer = int(text_conv)
@@ -153,9 +148,11 @@ def handle_message(event):
         session["current_index"] += 1
 
         if session["current_index"] < len(session["questions"]):
+            # السؤال التالي
             next_q = session["questions"][session["current_index"]]
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {next_q}"))
         else:
+            # انتهاء اللعبة وحساب الشخصية
             game_id = session["game_id"]
             result = calculate_personality(session["answers"], game_id)
             description = personality_descriptions.get(result, "وصف الشخصية غير متوفر.")
@@ -205,12 +202,10 @@ def handle_message(event):
         chosen_game = random.choice(available_games)
         game_questions = [f"السؤال {i+1}" for i in range(len(games[chosen_game]))]
         sessions[user_id] = {"game_id": chosen_game, "questions": game_questions, "current_index": 0, "answers": []}
+        # إرسال أول سؤال
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {game_questions[0]}"))
         return
 
-# =========================
-# تشغيل السيرفر
-# =========================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
