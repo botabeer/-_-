@@ -2,7 +2,7 @@ from flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os, random, typing, json, re
+import os, random, typing, json
 
 app = Flask(__name__)
 
@@ -90,13 +90,7 @@ def get_next_general_question(qtype: str) -> str:
 def handle_message(event):
     text = event.message.text.strip()
     user_id = event.source.user_id
-    try:
-        display_name = line_bot_api.get_profile(user_id).display_name
-        display_name = re.sub(r'[\u2000-\u206F\u2800]', '', display_name).strip()
-        if not display_name:
-            display_name = "عضو"
-    except:
-        display_name = "عضو"
+    display_name = line_bot_api.get_profile(user_id).display_name
     group_id = getattr(event.source, "group_id", None)
 
     arabic_to_english = {"١": "1", "٢": "2", "٣": "3", "٤": "4"}
@@ -117,7 +111,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # أسئلة عامة
+    # أسئلة عامة (سؤال/تحدي/اعتراف/شخصي)
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
         q_text = get_next_general_question(text)
         if not q_text:
@@ -175,13 +169,13 @@ def handle_message(event):
         q_list = games_data[game_id]
 
         # بعد آخر سؤال مباشرة
-        if player["step"] >= len(q_list) - 1:
+        if player["step"] >= len(q_list)-1:   # التعديل هنا
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
-            del gs["players"][user_id]  # حذف اللاعب من الجلسة
+            del gs["players"][user_id]
             return
 
         # إذا لم يكن آخر سؤال
@@ -198,7 +192,7 @@ def handle_message(event):
         session["answers"].append(int(text_conv))
 
         # بعد آخر سؤال مباشرة
-        if session["step"] >= len(session["questions"]) - 1:
+        if session["step"] >= len(session["questions"]) - 1:   # التعديل هنا
             trait = calculate_personality(session["answers"], "default")
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
@@ -213,13 +207,11 @@ def handle_message(event):
 
     # إنهاء اللعبة
     if text == "إيقاف":
-        # إنهاء جميع الجلسات الفردية
-        if user_id in sessions:
-            del sessions[user_id]
-        # إنهاء جميع الجلسات الجماعية الخاصة بالمجموعة
         if group_id and group_id in group_sessions:
             del group_sessions[group_id]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="تم إنهاء اللعبة الحالية بالكامل."))
+        if user_id in sessions:
+            del sessions[user_id]
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="تم إنهاء اللعبة الحالية."))
         return
 
 if __name__ == "__main__":
