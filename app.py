@@ -42,8 +42,8 @@ game_weights = load_json_file("game_weights.json")
 sessions = {}
 group_sessions = {}
 
-# متتالية الأسئلة لتجنب التكرار
-question_indices = {"سؤال": 0, "تحدي": 0, "اعتراف": 0, "شخصي": 0}
+# عدادات الأسئلة لكل نوع لتجنب التكرار
+question_counters = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -77,14 +77,14 @@ def format_question(index: int, question_text: str) -> str:
     options = "\n".join(lines[1:]) if len(lines) > 1 else ""
     return f"{question_line}\n{options}"
 
-# الحصول على أسئلة حسب النوع بالترتيب لتجنب التكرار
+# الحصول على أسئلة حسب النوع مع التكرار
 def get_next_question(qtype: str) -> str:
-    qlist = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}.get(qtype, [])
-    if not qlist:
-        return "لا توجد أسئلة حالياً."
-    index = question_indices[qtype]
-    question_indices[qtype] = (index + 1) % 100  # تعيد من 1 بعد 100 سؤال
-    return qlist[index % len(qlist)]
+    global question_counters
+    qlist = {"سؤال":questions,"تحدي":challenges,"اعتراف":confessions,"شخصي":personal_questions}.get(qtype,[])
+    if not qlist: return "لا توجد أسئلة حالياً."
+    idx = question_counters[qtype] % len(qlist)
+    question_counters[qtype] += 1
+    return qlist[idx]
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -111,7 +111,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # أسئلة عامة (سؤال، تحدي، اعتراف، شخصي)
+    # أسئلة عامة
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
         q_text = get_next_question(text)
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
@@ -121,16 +121,7 @@ def handle_message(event):
     if text == "لعبه":
         reply = (
             "اختر اللعبة بكتابة اسمها:\n"
-            "لعبه1\n"
-            "لعبه2\n"
-            "لعبه3\n"
-            "لعبه4\n"
-            "لعبه5\n"
-            "لعبه6\n"
-            "لعبه7\n"
-            "لعبه8\n"
-            "لعبه9\n"
-            "لعبه10\n\n"
+            "لعبه1\nلعبه2\nلعبه3\nلعبه4\nلعبه5\nلعبه6\nلعبه7\nلعبه8\nلعبه9\nلعبه10\n\n"
             "ابدأ - الانضمام للعبة الحالية\n"
             "إيقاف - إنهاء اللعبة الحالية"
         )
@@ -181,11 +172,13 @@ def handle_message(event):
             question_text = format_question(player["step"], q_list[player["step"]])
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         else:
+            # بعد آخر سؤال مباشرة حساب الشخصية
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
-            line_bot_api.push_message(group_id, TextSendMessage(
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
+            # إزالة اللاعب من الجلسة
             del gs["players"][user_id]
         return
 
