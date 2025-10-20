@@ -34,21 +34,16 @@ questions = load_file_lines("questions.txt")
 challenges = load_file_lines("challenges.txt")
 confessions = load_file_lines("confessions.txt")
 personal_questions = load_file_lines("personality.txt")
-games_data = load_json_file("games.txt")  # أسئلة الألعاب بصيغة JSON
-personality_descriptions = load_json_file("characters.json")
+games_data = load_json_file("games.txt")
+personality_descriptions = load_json_file("characters.txt")
 game_weights = load_json_file("game_weights.json")
 
 # جلسات اللاعبين الفردية والجماعية
 sessions = {}
 group_sessions = {}
 
-# عدادات عامة لتجنب التكرار في سؤال / تحدي / اعتراف / شخصي
-question_counters = {
-    "سؤال": 0,
-    "تحدي": 0,
-    "اعتراف": 0,
-    "شخصي": 0
-}
+# لتعقب الأسئلة العامة لتجنب التكرار حتى 100
+general_indices = {"سؤال": 0, "تحدي": 0, "اعتراف": 0, "شخصي": 0}
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -82,13 +77,14 @@ def format_question(index: int, question_text: str) -> str:
     options = "\n".join(lines[1:]) if len(lines) > 1 else ""
     return f"{question_line}\n{options}"
 
-# الحصول على أسئلة حسب النوع
-def get_questions_by_type(qtype: str) -> list:
-    if qtype == "سؤال": return questions
-    if qtype == "تحدي": return challenges
-    if qtype == "اعتراف": return confessions
-    if qtype == "شخصي": return personal_questions
-    return []
+# الحصول على أسئلة حسب النوع مع تجنب التكرار حتى 100
+def get_next_general_question(qtype: str) -> str:
+    qlist = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}.get(qtype, [])
+    if not qlist:
+        return ""
+    index = general_indices[qtype] % len(qlist)
+    general_indices[qtype] += 1
+    return qlist[index]
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -108,35 +104,27 @@ def handle_message(event):
             "تحدي  → عرض تحدي\n"
             "اعتراف → عرض اعتراف\n"
             "شخصي  → عرض سؤال شخصي\n"
-            "لعبه  → عرض قائمة الألعاب المتاحة\n"
+            "لعبه  → عرض قائمة الألعاب المتاحة (لعبه1 → لعبه10)\n"
             "ابدأ  → الانضمام للعبة الحالية في القروب\n"
             "إيقاف → إنهاء اللعبة الحالية"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # أسئلة عامة (سؤال، تحدي، اعتراف، شخصي)
-    if text in ["سؤال", "تحدي", "اعتراف", "شخصي"]:
-        q_list = get_questions_by_type(text)
-        if not q_list:
+    # أسئلة عامة (سؤال/تحدي/اعتراف/شخصي)
+    if text in ["سؤال","تحدي","اعتراف","شخصي"]:
+        q_text = get_next_general_question(text)
+        if not q_text:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: لا توجد أسئلة حالياً."))
             return
-
-        # زيادة العداد وتسلسل حتى 100 ثم يعيد من البداية
-        question_counters[text] = (question_counters[text] + 1) % 100
-        index = question_counters[text] - 1 if question_counters[text] != 0 else 99
-        q_text = q_list[index % len(q_list)]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{text}: {q_text}"))
+        sessions[user_id] = {"step": 0, "answers": [], "questions": [q_text]}
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
         return
 
     # عرض قائمة الألعاب
     if text == "لعبه":
-        reply = (
-            "اختر اللعبة بكتابة اسمها:\n"
-            "لعبه1\nلعبه2\nلعبه3\nلعبه4\nلعبه5\nلعبه6\nلعبه7\nلعبه8\nلعبه9\nلعبه10\n\n"
-            "ابدأ - الانضمام للعبة الحالية\n"
-            "إيقاف - إنهاء اللعبة الحالية"
-        )
+        reply = "اختر اللعبة بكتابة اسمها:\n" + "\n".join([f"لعبه{i}" for i in range(1,11)])
+        reply += "\n\nابدأ - الانضمام للعبة الحالية\nإيقاف - إنهاء اللعبة الحالية"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
@@ -171,17 +159,17 @@ def handle_message(event):
     if group_id and group_id in group_sessions and user_id in group_sessions[group_id]["players"]:
         gs = group_sessions[group_id]
         player = gs["players"][user_id]
-        game_id = gs["game"]
-        q_list = games_data[game_id]
 
         if text_conv not in ["1","2","3","4"]:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="الرجاء اختيار رقم بين 1 و4"))
             return
 
         player["answers"].append(int(text_conv))
+        game_id = gs["game"]
+        q_list = games_data[game_id]
 
-        # بعد السؤال الخامس مباشرة تحليل الشخصية
-        if len(player["answers"]) >= 5:
+        # بعد آخر سؤال مباشرة
+        if player["step"] == len(q_list)-1:
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
@@ -190,10 +178,29 @@ def handle_message(event):
             del gs["players"][user_id]
             return
 
-        # عرض السؤال التالي
+        # إذا لم يكن آخر سؤال
         player["step"] += 1
         question_text = format_question(player["step"], q_list[player["step"]])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
+        return
+
+    # الرد على أسئلة الألعاب الفردية
+    if user_id in sessions:
+        session = sessions[user_id]
+        if text_conv not in ["1","2","3","4"]:
+            return
+        session["answers"].append(int(text_conv))
+        session["step"] += 1
+        if session["step"] < len(session["questions"]):
+            q_text = format_question(session["step"], session["questions"][session["step"]])
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
+        else:
+            trait = calculate_personality(session["answers"], "default")
+            desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
+            ))
+            del sessions[user_id]
         return
 
     # إنهاء اللعبة
@@ -204,7 +211,6 @@ def handle_message(event):
             del sessions[user_id]
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="تم إنهاء اللعبة الحالية."))
         return
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
