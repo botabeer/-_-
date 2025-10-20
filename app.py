@@ -169,7 +169,7 @@ def handle_message(event):
         q_list = games_data[game_id]
 
         # بعد آخر سؤال مباشرة
-        if player["step"] == len(q_list)-1:
+        if player["step"] >= len(q_list)-1:
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
@@ -190,26 +190,30 @@ def handle_message(event):
         if text_conv not in ["1","2","3","4"]:
             return
         session["answers"].append(int(text_conv))
-        session["step"] += 1
-        if session["step"] < len(session["questions"]):
-            q_text = format_question(session["step"], session["questions"][session["step"]])
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
-        else:
+
+        # بعد آخر سؤال مباشرة
+        if session["step"] >= len(session["questions"]) - 1:
             trait = calculate_personality(session["answers"], "default")
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
             del sessions[user_id]
+        else:
+            session["step"] += 1
+            q_text = format_question(session["step"], session["questions"][session["step"]])
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
         return
 
     # إنهاء اللعبة
     if text == "إيقاف":
-        if group_id and group_id in group_sessions:
-            del group_sessions[group_id]
+        # إنهاء جميع الجلسات الفردية
         if user_id in sessions:
             del sessions[user_id]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="تم إنهاء اللعبة الحالية."))
+        # إنهاء جميع الجلسات الجماعية الخاصة بالمجموعة
+        if group_id and group_id in group_sessions:
+            del group_sessions[group_id]
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="تم إنهاء اللعبة الحالية بالكامل."))
         return
 
 if __name__ == "__main__":
