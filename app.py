@@ -2,7 +2,7 @@ from flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os, typing, json
+import os, random, typing, json
 
 app = Flask(__name__)
 
@@ -34,16 +34,13 @@ questions = load_file_lines("questions.txt")
 challenges = load_file_lines("challenges.txt")
 confessions = load_file_lines("confessions.txt")
 personal_questions = load_file_lines("personality.txt")
-games_data = load_json_file("games.txt")  # أسئلة الألعاب
-personality_descriptions = load_json_file("characters.json")  # وصف الشخصيات
-game_weights = load_json_file("game_weights.json")  # أوزان الشخصية
+games_data = load_json_file("games.txt")  # أسئلة الألعاب بصيغة JSON
+personality_descriptions = load_json_file("characters.json")
+game_weights = load_json_file("game_weights.json")
 
 # جلسات اللاعبين الفردية والجماعية
 sessions = {}
 group_sessions = {}
-
-# تتبع ترتيب الأسئلة لتجنب التكرار
-question_indexes = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -77,14 +74,13 @@ def format_question(index: int, question_text: str) -> str:
     options = "\n".join(lines[1:]) if len(lines) > 1 else ""
     return f"{question_line}\n{options}"
 
-# الحصول على سؤال حسب النوع بالترتيب وتجنب التكرار
-def get_next_question(qtype: str) -> str:
-    q_list = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}.get(qtype, [])
-    if not q_list:
-        return "لا توجد أسئلة حالياً."
-    idx = question_indexes[qtype]
-    question_indexes[qtype] = (idx + 1) % len(q_list)
-    return q_list[idx]
+# الحصول على أسئلة حسب النوع
+def get_questions_by_type(qtype: str) -> list:
+    if qtype == "سؤال": return questions
+    if qtype == "تحدي": return challenges
+    if qtype == "اعتراف": return confessions
+    if qtype == "شخصي": return personal_questions
+    return []
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -113,18 +109,19 @@ def handle_message(event):
 
     # أسئلة عامة
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
-        question_text = get_next_question(text)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{text}: {question_text}"))
+        q_list = get_questions_by_type(text)
+        if not q_list:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: لا توجد أسئلة حالياً."))
+            return
+        sessions[user_id] = {"step": 0, "answers": [], "questions": q_list}
+        q_text = f"{display_name}\n\n{q_list[0]}"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=q_text))
         return
 
     # عرض قائمة الألعاب
     if text == "لعبه":
-        reply = (
-            "اختر اللعبة بكتابة اسمها:\n"
-            "لعبه1\nلعبه2\nلعبه3\nلعبه4\nلعبه5\nلعبه6\nلعبه7\nلعبه8\nلعبه9\nلعبه10\n\n"
-            "ابدأ - الانضمام للعبة الحالية\n"
-            "إيقاف - إنهاء اللعبة الحالية"
-        )
+        reply = "اختر اللعبة بكتابة اسمها:\n" + "\n".join([f"لعبه{i}" for i in range(1,11)])
+        reply += "\n\nابدأ - الانضمام للعبة الحالية\nإيقاف - إنهاء اللعبة الحالية"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
@@ -163,22 +160,25 @@ def handle_message(event):
         if text_conv not in ["1","2","3","4"]:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="الرجاء اختيار رقم بين 1 و4"))
             return
+
         player["answers"].append(int(text_conv))
-        player["step"] += 1
         game_id = gs["game"]
         q_list = games_data[game_id]
 
-        if player["step"] < len(q_list):
-            question_text = format_question(player["step"], q_list[player["step"]])
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
-        else:
-            # بعد آخر سؤال مباشرة، نحسب الشخصية ونرسل التحليل
+        # بعد آخر سؤال مباشرة
+        if player["step"] == len(q_list)-1:
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
             del gs["players"][user_id]
+            return
+
+        # إذا لم يكن آخر سؤال
+        player["step"] += 1
+        question_text = format_question(player["step"], q_list[player["step"]])
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         return
 
     # الرد على أسئلة الألعاب الفردية
