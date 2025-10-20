@@ -102,6 +102,48 @@ def handle_message(event):
     user_id = event.source.user_id
     display_name = line_bot_api.get_profile(user_id).display_name
 
+    # بدء اللعبة تلقائيًا إذا المستخدم جديد
+    if user_id not in group_sessions:
+        group_sessions[user_id] = {"game_started": True, "answers": []}
+        available_games = list(games.keys())[:10]
+        if available_games:
+            first_game = available_games[0]
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"{display_name}: تم بدء اللعبة تلقائيًا -> {first_game}")
+            )
+            next_question = get_next_item("questions")
+            line_bot_api.push_message(
+                user_id,
+                TextSendMessage(text=f"{display_name}: السؤال الأول -> {next_question}")
+            )
+        return
+
+    # استقبال الإجابة وحساب التحليل بعد عدد معين من الأسئلة
+    session = group_sessions.get(user_id)
+    if session and "game_started" in session:
+        try:
+            answer = int(text)  # نفترض أن الإجابة رقمية
+        except ValueError:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="أرسل رقم الإجابة فقط."))
+            return
+
+        session["answers"].append(answer)
+        next_question = get_next_item("questions")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: السؤال التالي -> {next_question}"))
+
+        # بعد 5 أسئلة، حساب التحليل
+        if len(session["answers"]) >= 5:
+            first_game = list(games.keys())[0]
+            personality_result = calculate_personality(session["answers"], first_game)
+            line_bot_api.push_message(
+                user_id,
+                TextSendMessage(text=f"{display_name}: تم الانتهاء من اللعبة. تحليل شخصيتك -> {personality_result}")
+            )
+            del group_sessions[user_id]
+        return
+
+    # أوامر عادية
     if text == "مساعدة":
         reply = (
             "أوامر البوت:\n"
@@ -115,33 +157,6 @@ def handle_message(event):
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
-
-    if text == "سؤال":
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {get_next_item('questions')}"))
-        return
-
-    if text == "تحدي":
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {get_next_item('challenges')}"))
-        return
-
-    if text == "اعتراف":
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {get_next_item('confessions')}"))
-        return
-
-    if text == "شخصي":
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: {get_next_item('personal')}"))
-        return
-
-    if text == "لعبه":
-        available_games = list(games.keys())[:10]
-        if not available_games:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="لا توجد ألعاب متاحة."))
-        else:
-            chosen_game = random.choice(available_games)
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: تم اختيار اللعبة -> {chosen_game}"))
-        return
-
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="اكتب 'مساعدة' لمعرفة الأوامر."))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
