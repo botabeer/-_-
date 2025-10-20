@@ -1,11 +1,12 @@
-from flask import Flask, request, abort
+fromfrom flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError, LineBotApiError
+from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import os, random, typing, json
 
 app = Flask(__name__)
 
+# إعداد التوكن والسر
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
@@ -14,9 +15,7 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# =====================
-# تحميل الملفات
-# =====================
+# ======== تحميل الملفات ========
 def load_file_lines(filename: str) -> typing.List[str]:
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -24,93 +23,68 @@ def load_file_lines(filename: str) -> typing.List[str]:
     except Exception:
         return []
 
-def load_games_from_txt(filename: str) -> dict:
+def load_json_file(filename: str) -> dict:
     try:
         with open(filename, "r", encoding="utf-8") as f:
             return json.loads(f.read())
     except Exception:
         return {}
 
-questions_file = load_file_lines("questions.txt")
-challenges_file = load_file_lines("challenges.txt")
-confessions_file = load_file_lines("confessions.txt")
-personal_file = load_file_lines("personality.txt")
-games = load_games_from_txt("games.txt")
+questions = load_file_lines("questions.txt")
+challenges = load_file_lines("challenges.txt")
+confessions = load_file_lines("confessions.txt")
+personal_questions = load_file_lines("personality.txt")
+games = load_json_file("games.txt")
 
-# شخصيات
 try:
     with open("characters.txt", "r", encoding="utf-8") as f:
         personalities = f.read().split("\n\n")
 except Exception:
     personalities = []
 
-# =====================
-# أوزان كل لعبة لتحليل الشخصية
-# =====================
-game_weights = {
-    "لعبه1":[{"1":{"الاجتماعي":2,"المغامر":1},"2":{"المفكر":2},"3":{"الهادئ":2},"4":{"المبدع":2}},
-              {"1":{"المغامر":2},"2":{"الهادئ":2},"3":{"المفكر":1},"4":{"الاجتماعي":2}},
-              {"1":{"المبدع":2},"2":{"القائد":2},"3":{"الهادئ":2},"4":{"المفكر":1}},
-              {"1":{"المفكر":2},"2":{"الهادئ":1},"3":{"المبدع":2},"4":{"المغامر":1}},
-              {"1":{"الحساس":2},"2":{"المتحمس":2},"3":{"المبدع":1},"4":{"الهادئ":1}}],
-    "لعبه2":[{"1":{"المغامر":2},"2":{"الحساس":2},"3":{"المبدع":1},"4":{"الهادئ":1}},
-              {"1":{"المغامر":2},"2":{"الهادئ":2},"3":{"الاجتماعي":2},"4":{"المفكر":1}},
-              {"1":{"المغامر":2},"2":{"المبدع":2},"3":{"الحساس":1},"4":{"المفكر":1}},
-              {"1":{"الاجتماعي":2},"2":{"الحساس":2},"3":{"المتحمس":1},"4":{"المبدع":1}},
-              {"1":{"المغامر":2},"2":{"الهادئ":1},"3":{"المفكر":1},"4":{"المبدع":1}}],
-    "لعبه3":[{"1":{"المغامر":2},"2":{"المفكر":1},"3":{"الهادئ":2},"4":{"المبدع":1}},
-              {"1":{"المغامر":2},"2":{"الاجتماعي":2},"3":{"القائد":1},"4":{"المتحمس":1}},
-              {"1":{"المغامر":2},"2":{"الهادئ":2},"3":{"المبدع":1},"4":{"الحساس":1}},
-              {"1":{"المفكر":2},"2":{"المتحمس":2},"3":{"الاجتماعي":1},"4":{"الهادئ":1}},
-              {"1":{"المغامر":2},"2":{"الهادئ":1},"3":{"المبدع":2},"4":{"الحساس":1}}],
-    "لعبه4":[{"1":{"المغامر":2},"2":{"الهادئ":1},"3":{"المبدع":2},"4":{"المتحمس":1}},
-              {"1":{"الاجتماعي":2},"2":{"المغامر":2},"3":{"المفكر":1},"4":{"الهادئ":1}},
-              {"1":{"المفكر":2},"2":{"المبدع":2},"3":{"الهادئ":1},"4":{"الحساس":1}},
-              {"1":{"الحساس":2},"2":{"المتحمس":2},"3":{"الاجتماعي":1},"4":{"الهادئ":1}},
-              {"1":{"المغامر":2},"2":{"المبدع":2},"3":{"المفكر":1},"4":{"الهادئ":1}}],
-    "لعبه5":[{"1":{"المغامر":2},"2":{"الهادئ":1},"3":{"المتحمس":1},"4":{"المبدع":2}},
-              {"1":{"المغامر":2},"2":{"الاجتماعي":1},"3":{"الهادئ":1},"4":{"المتحمس":2}},
-              {"1":{"المفكر":2},"2":{"المبدع":2},"3":{"الحساس":1},"4":{"الهادئ":1}},
-              {"1":{"الحساس":2},"2":{"المتحمس":2},"3":{"المبدع":1},"4":{"الهادئ":1}},
-              {"1":{"المغامر":2},"2":{"المفكر":1},"3":{"المبدع":2},"4":{"الهادئ":1}}],
-    "لعبه6":[{"1":{"الهادئ":2},"2":{"المغامر":1},"3":{"المفكر":1},"4":{"المبدع":2}},
-              {"1":{"الحساس":2},"2":{"المغامر":1},"3":{"المبدع":2},"4":{"الهادئ":1}},
-              {"1":{"المفكر":2},"2":{"المغامر":1},"3":{"الهادئ":1},"4":{"المبدع":2}},
-              {"1":{"المغامر":2},"2":{"الحساس":1},"3":{"المتحمس":2},"4":{"المبدع":1}},
-              {"1":{"المغامر":2},"2":{"الهادئ":1},"3":{"المبدع":2},"4":{"المفكر":1}}],
-    "لعبه7":[{"1":{"الاجتماعي":2},"2":{"المغامر":1},"3":{"الهادئ":1},"4":{"المبدع":2}},
-              {"1":{"المفكر":2},"2":{"المغامر":1},"3":{"الحساس":1},"4":{"الهادئ":2}},
-              {"1":{"المغامر":2},"2":{"الهادئ":2},"3":{"المبدع":1},"4":{"الحساس":1}},
-              {"1":{"المغامر":2},"2":{"المتحمس":1},"3":{"الهادئ":1},"4":{"المبدع":2}},
-              {"1":{"المغامر":2},"2":{"المفكر":2},"3":{"الهادئ":1},"4":{"المبدع":1}}],
-    "لعبه8":[{"1":{"الاجتماعي":2},"2":{"المغامر":1},"3":{"المفكر":1},"4":{"الهادئ":2}},
-              {"1":{"المتحمس":2},"2":{"المغامر":1},"3":{"المبدع":2},"4":{"الهادئ":1}},
-              {"1":{"المفكر":2},"2":{"المغامر":1},"3":{"الهادئ":1},"4":{"المبدع":2}},
-              {"1":{"الحساس":2},"2":{"الممتش":2},"3":{"المغامر":1},"4":{"المبدع":1}},
-              {"1":{"المغامر":2},"2":{"الهادئ":1},"3":{"المبدع":2},"4":{"المفكر":1}}],
-    "لعبه9":[{"1":{"المغامر":2},"2":{"الهادئ":1},"3":{"المتحمس":1},"4":{"المبدع":2}},
-              {"1":{"المغامر":2},"2":{"الاجتماعي":1},"3":{"الهادئ":1},"4":{"المتحمس":2}},
-              {"1":{"المفكر":2},"2":{"المبدع":2},"3":{"الحساس":1},"4":{"الهادئ":1}},
-              {"1":{"الحساس":2},"2":{"المتحمس":2},"3":{"المبدع":1},"4":{"الهادئ":1}},
-              {"1":{"المغامر":2},"2":{"المفكر":1},"3":{"المبدع":2},"4":{"الهادئ":1}}],
-    "لعبه10":[{"1":{"الرومانسي":2},"2":{"المغامر":1},"3":{"الهادئ":1},"4":{"الحساس":2}},
-               {"1":{"المغامر":2},"2":{"الاجتماعي":1},"3":{"المبدع":2},"4":{"المتحمس":1}},
-               {"1":{"المفكر":2},"2":{"المغامر":1},"3":{"الهادئ":1},"4":{"المبدع":2}},
-               {"1":{"الحساس":2},"2":{"المتحمس":2},"3":{"المغامر":1},"4":{"المبدع":1}},
-               {"1":{"المغامر":2},"2":{"المبدع":2},"3":{"الهادئ":1},"4":{"المفكر":1}}]
+# ======== إعداد أوزان الألعاب ========
+try:
+    with open("game_weights.json", "r", encoding="utf-8") as f:
+        game_weights = json.load(f)
+except Exception:
+    game_weights = {}
+
+# ======== تتبع المواقع لكل مجموعة ========
+indexes = {
+    "questions": 0,
+    "challenges": 0,
+    "confessions": 0,
+    "personal": 0
 }
 
-# =====================
-# دوال المساعدة
-# =====================
-def get_next_item(user_id, category_list, category_name):
-    session = group_sessions.get(user_id, {})
-    used_index = session.get(f"{category_name}_index", 0)
-    item = category_list[used_index % len(category_list)]
-    session[f"{category_name}_index"] = used_index + 1
-    group_sessions[user_id] = session
-    return item
+# ======== نقاط الشخصيات ========
+personality_scores = {p:0 for p in ["الاجتماعي","الرومانسي","القائد","المغامر",
+                                    "المفكر","المرح","المبدع","الهادئ","المتحمس","الحساس"]}
 
+# ======== جلسات المجموعات ========
+group_sessions = {}
+
+# ======== المساعد ========
+@app.route("/callback", methods=["POST"])
+def callback():
+    signature = request.headers.get("X-Line-Signature", "")
+    body = request.get_data(as_text=True)
+
+    if not signature:
+        return "Missing X-Line-Signature", 400
+
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        print("⚠️ Invalid signature. Check your CHANNEL_SECRET and make sure this request is from LINE.")
+        return "Invalid signature", 400
+    except Exception as e:
+        print(f"⚠️ Exception handling webhook: {e}")
+        return str(e), 500
+
+    return "OK", 200
+
+# ======== تحليل الشخصية ========
 def calculate_personality(user_answers: typing.List[int], game_name: str) -> str:
     scores = {k:0 for k in personality_scores.keys()}
     weights = game_weights.get(game_name, [])
@@ -123,103 +97,94 @@ def calculate_personality(user_answers: typing.List[int], game_name: str) -> str
                 scores[key] += val
     return max(scores, key=scores.get)
 
-# =====================
-# المعالجة الرئيسية
-# =====================
+# ======== اختيار العنصر التالي مع تكرار دائري ========
+def get_next_item(category: str) -> str:
+    global indexes
+    items = {
+        "questions": questions,
+        "challenges": challenges,
+        "confessions": confessions,
+        "personal": personal_questions
+    }.get(category, [])
+
+    if not items:
+        return "لا توجد عناصر متاحة."
+
+    idx = indexes[category]
+    item = items[idx]
+    indexes[category] = (idx + 1) % len(items)
+    return item
+
+# ======== التعامل مع الرسائل ========
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    global group_sessions
     text = event.message.text.strip()
     user_id = event.source.user_id
-    try:
-        display_name = line_bot_api.get_profile(user_id).display_name
-    except LineBotApiError:
-        display_name = "المستخدم"
+    display_name = line_bot_api.get_profile(user_id).display_name
 
-    # مساعدة
+    # المساعدة
     if text == "مساعدة":
         line_bot_api.reply_message(event.reply_token, TextSendMessage(
             text=(
                 "أوامر البوت:\n"
                 "ابدأ - لبدء أي لعبة\n"
                 "ايقاف - لإيقاف اللعبة الجارية\n"
-                "سؤال - سؤال عشوائي\n"
-                "تحدي - تحدي عشوائي\n"
-                "اعتراف - اعتراف عشوائي\n"
-                "شخصي - نصيحة شخصية عشوائية\n"
-                "لعبه1 إلى لعبه10 - للعب الألعاب المختلفة"
+                "سؤال - اختيار سؤال عشوائي من الأسئلة العامة\n"
+                "تحدي - اختيار تحدي عشوائي\n"
+                "اعتراف - اختيار اعتراف عشوائي\n"
+                "شخصي - اختيار سؤال شخصي عشوائي\n"
+                "لعبه - اختيار لعبة عشوائية من الألعاب العشر"
             )
         ))
         return
 
-    # اختيار سؤال، تحدي، اعتراف، شخصي
+    # اختيار سؤال عام
     if text == "سؤال":
-        q = get_next_item(user_id, questions_file, "questions")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"@{display_name} {q}"))
+        item = get_next_item("questions")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(
+            text=f"{display_name}: {item}"
+        ))
         return
+
+    # اختيار تحدي
     if text == "تحدي":
-        q = get_next_item(user_id, challenges_file, "challenges")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"@{display_name} {q}"))
+        item = get_next_item("challenges")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(
+            text=f"{display_name}: {item}"
+        ))
         return
+
+    # اختيار اعتراف
     if text == "اعتراف":
-        q = get_next_item(user_id, confessions_file, "confessions")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"@{display_name} {q}"))
+        item = get_next_item("confessions")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(
+            text=f"{display_name}: {item}"
+        ))
         return
+
+    # اختيار سؤال شخصي
     if text == "شخصي":
-        q = get_next_item(user_id, personal_file, "personal")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"@{display_name} {q}"))
+        item = get_next_item("personal")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(
+            text=f"{display_name}: {item}"
+        ))
         return
 
-    # بدء اللعبة
-    if text.startswith("ابدأ") or (text.startswith("لعبه") and text in games):
-        game_name = text.split()[-1] if len(text.split()) > 1 else text
-        if game_name in games:
-            group_sessions[user_id] = {"game": game_name, "answers": [], "current_q":0}
-            first_q = games[game_name][0]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                text=f"@{display_name} اختر رقم الإجابة لكل سؤال:\n{first_q}"
-            ))
+    # اختيار لعبة عشوائية
+    if text.startswith("لعبه"):
+        available_games = list(games.keys())[:10]
+        chosen_game = random.choice(available_games)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(
+            text=f"{display_name}: تم اختيار اللعبة -> {chosen_game}"
+        ))
         return
 
-    # إيقاف اللعبة
-    if text == "ايقاف" and user_id in group_sessions:
-        del group_sessions[user_id]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"@{display_name} تم إيقاف اللعبة."))
-        return
+    # أي رسالة أخرى
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(
+        text="❌ لم أفهم الأمر، اكتب 'مساعدة' لمعرفة الأوامر."
+    ))
 
-    # الرد على الأرقام أثناء اللعبة
-    if text.isdigit() and user_id in group_sessions:
-        session = group_sessions[user_id]
-        game_name = session["game"]
-        session["answers"].append(int(text))
-        session["current_q"] += 1
-
-        if session["current_q"] < len(games[game_name]):
-            next_q = games[game_name][session["current_q"]]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                text=f"@{display_name} السؤال التالي:\n{next_q}"
-            ))
-        else:
-            top_personality = calculate_personality(session["answers"], game_name)
-            description = next((p for p in personalities if p.startswith(top_personality)), "شخصية غير محددة")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                text=f"@{display_name} لقد اكتملت اللعبة! شخصيتك هي: {top_personality}\n\n{description}"
-            ))
-            del group_sessions[user_id]
-
-# =====================
-# تشغيل السيرفر
-# =====================
-@app.route("/callback", methods=["POST"])
-def callback():
-    signature = request.headers.get("X-Line-Signature", "")
-    body = request.get_data(as_text=True)
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    return "OK", 200
-
+# ======== تشغيل السيرفر ========
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
