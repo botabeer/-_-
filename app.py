@@ -2,7 +2,7 @@ from flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os, random, typing, json
+import os, random, typing, json, re
 
 app = Flask(__name__)
 
@@ -90,7 +90,13 @@ def get_next_general_question(qtype: str) -> str:
 def handle_message(event):
     text = event.message.text.strip()
     user_id = event.source.user_id
-    display_name = line_bot_api.get_profile(user_id).display_name
+    try:
+        display_name = line_bot_api.get_profile(user_id).display_name
+        display_name = re.sub(r'[\u2000-\u206F\u2800]', '', display_name).strip()
+        if not display_name:
+            display_name = "عضو"
+    except:
+        display_name = "عضو"
     group_id = getattr(event.source, "group_id", None)
 
     arabic_to_english = {"١": "1", "٢": "2", "٣": "3", "٤": "4"}
@@ -111,7 +117,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # أسئلة عامة (سؤال/تحدي/اعتراف/شخصي)
+    # أسئلة عامة
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
         q_text = get_next_general_question(text)
         if not q_text:
@@ -169,13 +175,13 @@ def handle_message(event):
         q_list = games_data[game_id]
 
         # بعد آخر سؤال مباشرة
-        if player["step"] >= len(q_list)-1:
+        if player["step"] >= len(q_list) - 1:
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
-            del gs["players"][user_id]
+            del gs["players"][user_id]  # حذف اللاعب من الجلسة
             return
 
         # إذا لم يكن آخر سؤال
