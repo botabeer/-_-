@@ -14,7 +14,7 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# تحميل الملفات
+# دوال التحميل
 def load_file_lines(filename: str) -> typing.List[str]:
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -29,16 +29,23 @@ def load_json_file(filename: str) -> dict:
     except Exception:
         return {}
 
-# ملفات خارجية
+# الملفات
 questions = load_file_lines("questions.txt")
 challenges = load_file_lines("challenges.txt")
 confessions = load_file_lines("confessions.txt")
 personal_questions = load_file_lines("personality.txt")
-game_weights = load_json_file("game_weights.json")
-personality_descriptions = load_json_file("characters.txt")
+games_data = load_json_file("games.txt")          # أسئلة الألعاب الفردية
+game_weights = load_json_file("game_weights.json")  
+personality_descriptions = load_json_file("characters.txt")  
 
-# الأسئلة الخاصة باللعبة
-game_questions = [
+# جلسات اللاعبين للألعاب الفردية
+sessions = {}
+
+# تتبع الأسئلة العامة
+general_indices = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
+
+# أسئلة اللعبة الشخصية الجديدة
+personal_game_questions = [
     "إذا حصلت على مفتاح سحري، ماذا تفعل أولًا؟\n1. أزور كل أصدقائي\n2. أستكشف أماكن غريبة\n3. أصنع اختراعات ممتعة\n4. أستريح وأفكر",
     "إذا اكتشفت بوابة زمنية، أين تذهب؟\n1. الماضي لرؤية التاريخ\n2. المستقبل لرؤية الاختراعات\n3. أرسل رسالة لنفسي\n4. أستمتع بالمغامرة دون التخطيط",
     "إذا تمكنت من التحدث مع شخصية من الماضي، ماذا تفعل أولًا؟\n1. أرفض استقباله\n2. أستمع إلى قصصه\n3. أستفيد من خبراته\n4. أحاول فهم أفكاره",
@@ -48,14 +55,10 @@ game_questions = [
     "إذا كان بإمكانك التحليق في السماء، ماذا تختار؟\n1. الطيران مع أصدقائي\n2. الاستكشاف والتجوال\n3. رسم مسارات إبداعية\n4. الاستمتاع بالهدوء والسكينة",
     "إذا تلقيت رسالة سرية من مجهول، ماذا تفعل؟\n1. أشاركها مع الجميع\n2. أحاول حل اللغز\n3. أصنع مشروعًا مرتبطًا بها\n4. أحتفظ بها وأستمتع بالغموض",
     "إذا فاز صديقك في تحدي غريب، كيف تحتفل؟\n1. أرقص وأهتف معه\n2. أصفق بطريقة مبتكرة\n3. أخطط لمغامرة جديدة\n4. أشارك الفرح بهدوء",
-    "إذا وجدت كتابًا سحريًا، ماذا تختار؟\n1. أقرأه مع أصدقائي\n2. أستكشف أسراره وأغامر\n3. أستخدمه لصنع أشياء مبتكرة\n4. أستمتع بالهدوء والتأم"
+    "إذا وجدت كتابًا سحريًا، ماذا تختار؟\n1. أقرأه مع أصدقائي\n2. أستكشف أسراره وأغامر\n3. أستخدمه لصنع أشياء مبتكرة\n4. أستمتع بالهدوء والتأمل"
 ]
-
-# اسم اللعبة لاستخدام الأوزان
-game_id = "personal_game"
-
-# جلسات المستخدمين
-sessions = {}
+personal_game_id = "personal_game"
+personal_game_sessions = {}
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -69,10 +72,10 @@ def callback():
         print(f"Webhook exception: {e}")
     return "OK", 200
 
+# حساب الشخصية
 def calculate_personality(user_answers: typing.List[int], game_id: str) -> str:
     scores = {k: 0 for k in personality_descriptions.keys()}
     weights = game_weights.get(game_id, [])
-
     for i, ans in enumerate(user_answers):
         if i >= len(weights):
             continue
@@ -80,23 +83,32 @@ def calculate_personality(user_answers: typing.List[int], game_id: str) -> str:
         for key, val in weight.items():
             if key in scores:
                 scores[key] += val
-
     if all(v == 0 for v in scores.values()):
         return list(scores.keys())[0]
-
     return max(scores, key=scores.get)
 
+# تنسيق السؤال
 def format_question(index:int, question_text:str) -> str:
     lines = question_text.split("\n")
     question_line = f"السؤال {index+1}:\n{lines[0]}"
     options = "\n".join(lines[1:]) if len(lines)>1 else ""
     return f"{question_line}\n{options}"
 
+# الحصول على الأسئلة العامة بدون تكرار
+def get_next_general_question(qtype:str) -> str:
+    qlist = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}.get(qtype, [])
+    if not qlist:
+        return ""
+    index = general_indices[qtype] % len(qlist)
+    general_indices[qtype] += 1
+    return qlist[index]
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     text = event.message.text.strip()
     user_id = event.source.user_id
     display_name = line_bot_api.get_profile(user_id).display_name
+
     arabic_to_english = {"١":"1","٢":"2","٣":"3","٤":"4"}
     text_conv = arabic_to_english.get(text,text)
 
@@ -108,49 +120,64 @@ def handle_message(event):
             "تحدي  → عرض تحدي\n"
             "اعتراف → عرض اعتراف\n"
             "شخصي  → عرض سؤال شخصي\n"
-            "لعبه  → بدء لعبة شخصية مع أسئلة وتحليل مباشر"
+            "لعبه  → بدء اللعبة الشخصية مباشرة"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
     # الأسئلة العامة
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
-        qlist = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}
-        index = general_indices[text] % len(qlist[text])
-        general_indices[text] += 1
-        q_text = qlist[text][index]
+        q_text = get_next_general_question(text)
+        if not q_text:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}: لا توجد أسئلة حالياً."))
+            return
         sessions[user_id] = {"step":0,"answers":[],"questions":[q_text]}
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
         return
 
-    # بدء اللعبة الخاصة
+    # بدء اللعبة الشخصية
     if text == "لعبه":
-        sessions[user_id] = {"step":0,"answers":[],"questions":game_questions, "game": game_id}
-        q_text = format_question(0, game_questions[0])
+        personal_game_sessions[user_id] = {"step":0,"answers":[],"questions":personal_game_questions, "game": personal_game_id}
+        q_text = format_question(0, personal_game_questions[0])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
         return
 
-    # الرد على أسئلة اللعبة
-    if user_id in sessions:
-        session = sessions[user_id]
+    # الرد على أسئلة اللعبة الشخصية
+    if user_id in personal_game_sessions:
+        session = personal_game_sessions[user_id]
         if text_conv not in ["1","2","3","4"]:
             return
         session["answers"].append(int(text_conv))
+        step = session["step"]
         session["step"] += 1
 
-        # إذا كانت هذه الإجابة الأخيرة
         if session["step"] >= len(session["questions"]):
             trait = calculate_personality(session["answers"], session.get("game","default"))
             desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
-            del sessions[user_id]
+            del personal_game_sessions[user_id]
             return
 
-        # إرسال السؤال التالي
+        # السؤال التالي
         next_q = format_question(session["step"], session["questions"][session["step"]])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_q}"))
+        return
+
+    # الرد على الأسئلة العامة الفردية (كما كانت)
+    if user_id in sessions:
+        session = sessions[user_id]
+        if text_conv not in ["1","2","3","4"]:
+            return
+        session["answers"].append(int(text_conv))
+        step = session["step"]
+        session["step"] += 1
+        if session["step"] < len(session["questions"]):
+            next_q = session["questions"][session["step"]]
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_q}"))
+        else:
+            del sessions[user_id]
         return
 
 if __name__ == "__main__":
