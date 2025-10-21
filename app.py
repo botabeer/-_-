@@ -57,17 +57,23 @@ def callback():
         print(f"Webhook exception: {e}")
     return "OK", 200
 
-# حساب الشخصية بناءً على الأوزان
+# حساب الشخصية مع تعديل لضمان ظهور التحليل دائمًا
 def calculate_personality(user_answers: typing.List[int], game_id: str) -> str:
-    scores = {k:0 for k in personality_descriptions.keys()}
+    scores = {k: 0 for k in personality_descriptions.keys()}
     weights = game_weights.get(game_id, [])
+
     for i, ans in enumerate(user_answers):
         if i >= len(weights):
-            continue
+            continue  # إذا لم يوجد وزن، نتخطاه
         weight = weights[i].get(str(ans), {})
         for key, val in weight.items():
             if key in scores:
                 scores[key] += val
+
+    # إذا لم يتم إضافة أي نقطة، اختر أول شخصية بشكل افتراضي
+    if all(v == 0 for v in scores.values()):
+        return list(scores.keys())[0]
+
     return max(scores, key=scores.get)
 
 # تنسيق السؤال
@@ -165,7 +171,7 @@ def handle_message(event):
         game_id = gs["game"]
         q_list = games_data[game_id]
 
-        # التحقق من نهاية اللعبة باستخدام طول الإجابات
+        # إذا كانت هذه الإجابة الخامسة (آخر سؤال)
         if len(player["answers"]) >= len(q_list):
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
@@ -173,7 +179,7 @@ def handle_message(event):
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
             del gs["players"][user_id]
-            return
+            return  # توقف أي إرسال سؤال آخر
 
         # إرسال السؤال التالي فقط إذا لم تكن الإجابة الأخيرة
         next_question_text = format_question(len(player["answers"]), q_list[len(player["answers"])])
@@ -187,7 +193,7 @@ def handle_message(event):
             return
         session["answers"].append(int(text_conv))
 
-        # التحقق من نهاية اللعبة باستخدام طول الإجابات
+        # إذا كانت هذه الإجابة الخامسة (آخر سؤال)
         if len(session["answers"]) >= len(session["questions"]):
             trait = calculate_personality(session["answers"], "default")
             desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
@@ -195,7 +201,7 @@ def handle_message(event):
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
             del sessions[user_id]
-            return
+            return  # توقف أي إرسال سؤال آخر
 
         # إرسال السؤال التالي فقط إذا لم تكن الإجابة الأخيرة
         next_question_text = format_question(len(session["answers"]), session["questions"][len(session["answers"])])
