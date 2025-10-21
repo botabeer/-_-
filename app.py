@@ -58,13 +58,12 @@ def callback():
 
 # حساب الشخصية
 def calculate_personality(user_answers: typing.List[int]) -> str:
-    scores = game_weights.copy()  # game_weights.json يحتوي على كل الشخصيات بصفر في البداية
+    scores = game_weights.copy()  # يحتوي على جميع الشخصيات بصفر
     for i, ans in enumerate(user_answers):
         weight = games_data["game"][i]["answers"].get(str(ans), {}).get("weight", {})
         for key, val in weight.items():
             if key in scores:
                 scores[key] += val
-    # إعادة أعلى شخصية
     return max(scores, key=scores.get)
 
 # تنسيق السؤال
@@ -120,28 +119,25 @@ def handle_message(event):
 
     # بدء لعبة
     if text == "لعبه":
-        sessions[user_id] = {"step":0, "answers":[]}
-        question_text = format_question(0, games_data["game"][0])
+        sessions[user_id] = {
+            "step": 0,
+            "answers": [],
+            "questions": games_data["game"]
+        }
+        question_text = format_question(0, sessions[user_id]["questions"][0])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         return
 
     # الرد على أسئلة اللعبة
-    if user_id in sessions:
+    if user_id in sessions and "questions" in sessions[user_id]:
         session = sessions[user_id]
-        # التأكد من أن الجلسة هي لعبة
-        if "questions" not in session:
-            # عملية إدخال إجابة على سؤال عام
-            if text_conv not in ["1","2","3","4"]:
-                return
-            session["answers"].append(int(text_conv))
-            return
-        # عملية إدخال إجابة على لعبة
         if text_conv not in ["1","2","3","4"]:
             return
         session["answers"].append(int(text_conv))
         step = session["step"]
+
         # إذا وصلنا لآخر سؤال
-        if step+1 >= len(games_data["game"]):
+        if step+1 >= len(session["questions"]):
             trait = calculate_personality(session["answers"])
             desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
@@ -149,9 +145,10 @@ def handle_message(event):
             ))
             del sessions[user_id]
             return
+
         # إرسال السؤال التالي
         session["step"] += 1
-        next_question = format_question(session["step"], games_data["game"][session["step"]])
+        next_question = format_question(session["step"], session["questions"][session["step"]])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_question}"))
         return
 
