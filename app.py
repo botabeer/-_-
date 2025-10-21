@@ -14,72 +14,6 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# ===================== أسئلة اللعبة المدمجة =====================
-games_data = {
-    "game": [
-        {
-            "question": "إذا تلقيت دعوة لحضور ورشة فنية، ماذا تفعل؟",
-            "answers": {
-                "1": {"text": "أشارك مع الآخرين وأتفاعل معهم", "weight": {"الاجتماعي": 2}},
-                "2": {"text": "أدرس تقنيات الورشة قبل التطبيق", "weight": {"المفكر": 2}},
-                "3": {"text": "أبتكر أسلوبًا فنيًا جديدًا", "weight": {"المبدع": 2}},
-                "4": {"text": "أراقب الورشة وأتعلم بهدوء", "weight": {"الهادئ": 2}}
-            }
-        },
-        {
-            "question": "وجدت صديقًا قديمًا يحتاج لمساعدة، كيف تتصرف؟",
-            "answers": {
-                "1": {"text": "أقف بجانبه وأدعمه فورًا", "weight": {"الاجتماعي": 2}},
-                "2": {"text": "أفكر في أفضل حل لمساعدته", "weight": {"المفكر": 2}},
-                "3": {"text": "أستخدم فكرة مبتكرة لتقديم المساعدة", "weight": {"المبدع": 2}},
-                "4": {"text": "أراقب الوضع وأتصرف بهدوء", "weight": {"الهادئ": 2}}
-            }
-        },
-        {
-            "question": "إذا حصلت على فرصة لكتابة كتاب، ماذا تختار؟",
-            "answers": {
-                "1": {"text": "أكتب قصة جماعية مع أصدقائي", "weight": {"الاجتماعي": 2}},
-                "2": {"text": "أبحث عن أفكار دقيقة ومعلومات موثوقة", "weight": {"المفكر": 2}},
-                "3": {"text": "أبتكر أسلوب سرد مختلف ومبدع", "weight": {"المبدع": 2}},
-                "4": {"text": "أكتب بهدوء في أوقات معينة", "weight": {"الهادئ": 2}}
-            }
-        },
-        {
-            "question": "إذا حصلت على هدية مفاجئة، كيف تتصرف؟",
-            "answers": {
-                "1": {"text": "أشارك الفرحة مع الآخرين", "weight": {"الاجتماعي": 2}},
-                "2": {"text": "أفكر في معناها وكيف يمكن الاستفادة منها", "weight": {"المفكر": 2}},
-                "3": {"text": "أستعملها بطريقة مبتكرة", "weight": {"المبدع": 2}},
-                "4": {"text": "أحتفظ بها وأستمتع بها بهدوء", "weight": {"الهادئ": 2}}
-            }
-        },
-        {
-            "question": "إذا حصلت على فرصة السفر، ماذا تختار؟",
-            "answers": {
-                "1": {"text": "أسافر مع أصدقائي ونشارك المغامرة", "weight": {"الاجتماعي": 2}},
-                "2": {"text": "أخطط الرحلة بدقة قبل السفر", "weight": {"المفكر": 2}},
-                "3": {"text": "أختر أماكن غير تقليدية لتجربة جديدة", "weight": {"المبدع": 2}},
-                "4": {"text": "أستمتع بالرحلة بمفردي وبهدوء", "weight": {"الهادئ": 2}}
-            }
-        },
-        # ... أضف باقي الأسئلة حتى تصل 100 بنفس الطريقة ...
-    ]
-}
-
-game_weights = {
-    "الاجتماعي": 0,
-    "الرومانسي": 0,
-    "القائد": 0,
-    "المغامر": 0,
-    "المفكر": 0,
-    "المرح": 0,
-    "المبدع": 0,
-    "الهادئ": 0,
-    "المتحمس": 0,
-    "الحساس": 0
-}
-
-# ===================== باقي الكود كما هو =====================
 # دوال التحميل
 def load_file_lines(filename: str) -> typing.List[str]:
     try:
@@ -95,15 +29,19 @@ def load_json_file(filename: str) -> dict:
     except Exception:
         return {}
 
-# الملفات العامة
+# الملفات
 questions = load_file_lines("questions.txt")
 challenges = load_file_lines("challenges.txt")
 confessions = load_file_lines("confessions.txt")
 personal_questions = load_file_lines("personality.txt")
+games_data = load_json_file("games.txt")          # أسئلة اللعبة
+game_weights = load_json_file("game_weights.json")  
 personality_descriptions = load_json_file("characters.txt")  
 
 # جلسات اللاعبين
 sessions = {}
+
+# تتبع الأسئلة العامة
 general_indices = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
 
 @app.route("/callback", methods=["POST"])
@@ -118,15 +56,17 @@ def callback():
         print(f"Webhook exception: {e}")
     return "OK", 200
 
+# حساب الشخصية
 def calculate_personality(user_answers: typing.List[int]) -> str:
-    scores = game_weights.copy()
+    scores = game_weights.copy()  # يحتوي على جميع الشخصيات بصفر
     for i, ans in enumerate(user_answers):
-        weight = games_data["game"][i % len(games_data["game"])]["answers"].get(str(ans), {}).get("weight", {})
+        weight = games_data["game"][i]["answers"].get(str(ans), {}).get("weight", {})
         for key, val in weight.items():
             if key in scores:
                 scores[key] += val
     return max(scores, key=scores.get)
 
+# تنسيق السؤال
 def format_question(index:int, question_data: dict) -> str:
     q_text = question_data["question"]
     options = []
@@ -136,6 +76,7 @@ def format_question(index:int, question_data: dict) -> str:
     options_text = "\n".join(options)
     return f"السؤال {index+1}:\n{q_text}\n{options_text}"
 
+# الحصول على الأسئلة العامة بدون تكرار
 def get_next_general_question(qtype:str) -> str:
     qlist = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}.get(qtype, [])
     if not qlist:
@@ -153,6 +94,7 @@ def handle_message(event):
     arabic_to_english = {"١":"1","٢":"2","٣":"3","٤":"4"}
     text_conv = arabic_to_english.get(text,text)
 
+    # أمر المساعدة
     if text == "مساعدة":
         reply = (
             "أوامر البوت:\n\n"
@@ -165,6 +107,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
+    # الأسئلة العامة
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
         q_text = get_next_general_question(text)
         if not q_text:
@@ -174,6 +117,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
         return
 
+    # بدء لعبة
     if text == "لعبه":
         sessions[user_id] = {
             "step": 0,
@@ -184,6 +128,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         return
 
+    # الرد على أسئلة اللعبة
     if user_id in sessions and "questions" in sessions[user_id]:
         session = sessions[user_id]
         if text_conv not in ["1","2","3","4"]:
@@ -191,7 +136,7 @@ def handle_message(event):
         session["answers"].append(int(text_conv))
         step = session["step"]
 
-        # بعد كل 5 أسئلة إعطاء التحليل الحالي
+        # بعد كل 5 أسئلة إعطاء التحليل المؤقت
         if (step + 1) % 5 == 0:
             trait = calculate_personality(session["answers"])
             desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
@@ -199,8 +144,19 @@ def handle_message(event):
                 text=f"{display_name}\nتحليل مؤقت للشخصية ({trait}):\n{desc}"
             ))
 
-        # إرسال السؤال التالي (دوراني)
-        session["step"] = (step + 1) % len(session["questions"])
+        # الانتقال للسؤال التالي
+        session["step"] += 1
+
+        # إذا وصلنا لآخر سؤال نعيد من البداية
+        if session["step"] >= len(session["questions"]):
+            trait = calculate_personality(session["answers"])
+            desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك النهائي ({trait}):\n{desc}\n\nتمت إعادة اللعبة من البداية."
+            ))
+            session["step"] = 0
+            session["answers"] = []
+
         next_question = format_question(session["step"], session["questions"][session["step"]])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_question}"))
         return
