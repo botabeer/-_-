@@ -110,7 +110,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # أسئلة عامة (سؤال/تحدي/اعتراف/شخصي)
+    # أسئلة عامة
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
         q_text = get_next_general_question(text)
         if not q_text:
@@ -175,12 +175,11 @@ def handle_message(event):
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
             del gs["players"][user_id]
-            return
-
-        # إذا لم يكن آخر سؤال
-        player["step"] += 1
-        question_text = format_question(player["step"], q_list[player["step"]])
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
+        else:
+            # الانتقال للسؤال التالي
+            player["step"] += 1
+            question_text = format_question(player["step"], q_list[player["step"]])
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         return
 
     # الرد على أسئلة الألعاب الفردية
@@ -199,6 +198,7 @@ def handle_message(event):
             ))
             del sessions[user_id]
         else:
+            # الانتقال للسؤال التالي
             session["step"] += 1
             q_text = format_question(session["step"], session["questions"][session["step"]])
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
