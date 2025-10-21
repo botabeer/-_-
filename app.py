@@ -34,9 +34,9 @@ questions = load_file_lines("questions.txt")
 challenges = load_file_lines("challenges.txt")
 confessions = load_file_lines("confessions.txt")
 personal_questions = load_file_lines("personality.txt")
-games_data = load_json_file("games.txt")
-game_weights = load_json_file("game_weights.json")
-personality_descriptions = load_json_file("characters.txt")
+games_data = load_json_file("games.txt")          
+game_weights = load_json_file("game_weights.json")  
+personality_descriptions = load_json_file("characters.txt")  
 
 # جلسات اللاعبين
 sessions = {}
@@ -165,8 +165,8 @@ def handle_message(event):
         game_id = gs["game"]
         q_list = games_data[game_id]
 
-        # استخدام طول الإجابات لتحديد آخر سؤال
-        if len(player["answers"]) == len(q_list):
+        # التحقق من نهاية اللعبة باستخدام طول الإجابات
+        if len(player["answers"]) >= len(q_list):
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
@@ -175,10 +175,9 @@ def handle_message(event):
             del gs["players"][user_id]
             return
 
-        # الانتقال للسؤال التالي
-        player["step"] += 1
-        question_text = format_question(player["step"], q_list[player["step"]])
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
+        # إرسال السؤال التالي فقط إذا لم تكن الإجابة الأخيرة
+        next_question_text = format_question(len(player["answers"]), q_list[len(player["answers"])])
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_question_text}"))
         return
 
     # الألعاب الفردية
@@ -188,8 +187,8 @@ def handle_message(event):
             return
         session["answers"].append(int(text_conv))
 
-        # استخدام طول الإجابات لتحديد آخر سؤال
-        if len(session["answers"]) == len(session["questions"]):
+        # التحقق من نهاية اللعبة باستخدام طول الإجابات
+        if len(session["answers"]) >= len(session["questions"]):
             trait = calculate_personality(session["answers"], "default")
             desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
@@ -198,9 +197,9 @@ def handle_message(event):
             del sessions[user_id]
             return
 
-        session["step"] += 1
-        q_text = format_question(session["step"], session["questions"][session["step"]])
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
+        # إرسال السؤال التالي فقط إذا لم تكن الإجابة الأخيرة
+        next_question_text = format_question(len(session["answers"]), session["questions"][len(session["answers"])])
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_question_text}"))
         return
 
 if __name__ == "__main__":
