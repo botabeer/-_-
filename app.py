@@ -119,10 +119,15 @@ def handle_message(event):
 
     # بدء لعبة
     if text == "لعبه":
+        questions_list = games_data["game"].copy()
+        while len(questions_list) < 10:
+            questions_list.extend(games_data["game"])
+        questions_list = questions_list[:10]
+
         sessions[user_id] = {
             "step": 0,
             "answers": [],
-            "questions": games_data["game"]
+            "questions": questions_list
         }
         question_text = format_question(0, sessions[user_id]["questions"][0])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
