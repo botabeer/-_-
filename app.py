@@ -34,9 +34,9 @@ questions = load_file_lines("questions.txt")
 challenges = load_file_lines("challenges.txt")
 confessions = load_file_lines("confessions.txt")
 personal_questions = load_file_lines("personality.txt")
-games_data = load_json_file("games.txt")          
-game_weights = load_json_file("game_weights.json")  
-personality_descriptions = load_json_file("characters.txt")  
+games_data = load_json_file("games.txt")          # كل الألعاب مع الأسئلة
+game_weights = load_json_file("game_weights.json")  # الأوزان لكل سؤال
+personality_descriptions = load_json_file("characters.txt")  # وصف الشخصيات
 
 # جلسات اللاعبين
 sessions = {}
@@ -57,20 +57,19 @@ def callback():
         print(f"Webhook exception: {e}")
     return "OK", 200
 
-# حساب الشخصية مع تعديل لضمان ظهور التحليل دائمًا
+# حساب الشخصية
 def calculate_personality(user_answers: typing.List[int], game_id: str) -> str:
     scores = {k: 0 for k in personality_descriptions.keys()}
     weights = game_weights.get(game_id, [])
 
     for i, ans in enumerate(user_answers):
         if i >= len(weights):
-            continue  # إذا لم يوجد وزن، نتخطاه
+            continue
         weight = weights[i].get(str(ans), {})
         for key, val in weight.items():
             if key in scores:
                 scores[key] += val
 
-    # إذا لم يتم إضافة أي نقطة، اختر أول شخصية بشكل افتراضي
     if all(v == 0 for v in scores.values()):
         return list(scores.keys())[0]
 
@@ -168,10 +167,11 @@ def handle_message(event):
 
         # إضافة الإجابة
         player["answers"].append(int(text_conv))
+        player["step"] += 1
         game_id = gs["game"]
         q_list = games_data[game_id]
 
-        # إذا كانت هذه الإجابة الخامسة (آخر سؤال)
+        # إذا كانت هذه الإجابة الأخيرة
         if len(player["answers"]) >= len(q_list):
             trait = calculate_personality(player["answers"], game_id)
             desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
@@ -179,10 +179,10 @@ def handle_message(event):
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
             del gs["players"][user_id]
-            return  # توقف أي إرسال سؤال آخر
+            return
 
-        # إرسال السؤال التالي فقط إذا لم تكن الإجابة الأخيرة
-        next_question_text = format_question(len(player["answers"]), q_list[len(player["answers"])])
+        # إرسال السؤال التالي
+        next_question_text = format_question(player["step"], q_list[player["step"]])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_question_text}"))
         return
 
@@ -192,19 +192,20 @@ def handle_message(event):
         if text_conv not in ["1","2","3","4"]:
             return
         session["answers"].append(int(text_conv))
+        session["step"] += 1
 
-        # إذا كانت هذه الإجابة الخامسة (آخر سؤال)
-        if len(session["answers"]) >= len(session["questions"]):
+        # إذا كانت هذه الإجابة الأخيرة
+        if session["step"] >= len(session["questions"]):
             trait = calculate_personality(session["answers"], "default")
             desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
             del sessions[user_id]
-            return  # توقف أي إرسال سؤال آخر
+            return
 
-        # إرسال السؤال التالي فقط إذا لم تكن الإجابة الأخيرة
-        next_question_text = format_question(len(session["answers"]), session["questions"][len(session["answers"])])
+        # إرسال السؤال التالي
+        next_question_text = format_question(session["step"], session["questions"][session["step"]])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_question_text}"))
         return
 
