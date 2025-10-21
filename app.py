@@ -34,15 +34,15 @@ questions = load_file_lines("questions.txt")
 challenges = load_file_lines("challenges.txt")
 confessions = load_file_lines("confessions.txt")
 personal_questions = load_file_lines("personality.txt")
-games_data = load_json_file("games.txt")          # الأسئلة لكل لعبة
-game_weights = load_json_file("game_weights.json")  # أوزان كل إجابة
-personality_descriptions = load_json_file("characters.txt")  # وصف الشخصية
+games_data = load_json_file("games.txt")
+game_weights = load_json_file("game_weights.json")
+personality_descriptions = load_json_file("characters.txt")
 
 # جلسات اللاعبين
 sessions = {}
 group_sessions = {}
 
-# تتبع الأسئلة العامة لتجنب التكرار
+# تتبع الأسئلة العامة
 general_indices = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
 
 @app.route("/callback", methods=["POST"])
@@ -160,14 +160,15 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="الرجاء اختيار رقم بين 1 و4"))
             return
 
+        # إضافة الإجابة
         player["answers"].append(int(text_conv))
         game_id = gs["game"]
         q_list = games_data[game_id]
 
-        # بعد الإجابة على السؤال الخامس مباشرة
-        if player["step"] == len(q_list)-1:
+        # استخدام طول الإجابات لتحديد آخر سؤال
+        if len(player["answers"]) == len(q_list):
             trait = calculate_personality(player["answers"], game_id)
-            desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
+            desc = personality_descriptions.get(trait, "وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
             ))
@@ -176,7 +177,7 @@ def handle_message(event):
 
         # الانتقال للسؤال التالي
         player["step"] += 1
-        question_text = format_question(player["step"],q_list[player["step"]])
+        question_text = format_question(player["step"], q_list[player["step"]])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         return
 
@@ -187,7 +188,8 @@ def handle_message(event):
             return
         session["answers"].append(int(text_conv))
 
-        if session["step"] == len(session["questions"])-1:
+        # استخدام طول الإجابات لتحديد آخر سؤال
+        if len(session["answers"]) == len(session["questions"]):
             trait = calculate_personality(session["answers"], "default")
             desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
