@@ -34,31 +34,15 @@ questions = load_file_lines("questions.txt")
 challenges = load_file_lines("challenges.txt")
 confessions = load_file_lines("confessions.txt")
 personal_questions = load_file_lines("personality.txt")
-games_data = load_json_file("games.txt")          # أسئلة الألعاب الفردية
+games_data = load_json_file("games.txt")          
 game_weights = load_json_file("game_weights.json")  
 personality_descriptions = load_json_file("characters.txt")  
 
-# جلسات اللاعبين للألعاب الفردية
+# جلسات اللاعبين
 sessions = {}
 
 # تتبع الأسئلة العامة
 general_indices = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
-
-# أسئلة اللعبة الشخصية الجديدة
-personal_game_questions = [
-    "إذا حصلت على مفتاح سحري، ماذا تفعل أولًا؟\n1. أزور كل أصدقائي\n2. أستكشف أماكن غريبة\n3. أصنع اختراعات ممتعة\n4. أستريح وأفكر",
-    "إذا اكتشفت بوابة زمنية، أين تذهب؟\n1. الماضي لرؤية التاريخ\n2. المستقبل لرؤية الاختراعات\n3. أرسل رسالة لنفسي\n4. أستمتع بالمغامرة دون التخطيط",
-    "إذا تمكنت من التحدث مع شخصية من الماضي، ماذا تفعل أولًا؟\n1. أرفض استقباله\n2. أستمع إلى قصصه\n3. أستفيد من خبراته\n4. أحاول فهم أفكاره",
-    "إذا كان بإمكانك التمتع بيوم بلا مسؤوليات، كيف تقضيه؟\n1. ألتقي بالأصدقاء\n2. أستكشف هواية جديدة\n3. أصنع مشروعًا ممتعًا\n4. أستريح وأقرأ",
-    "إذا ربحت كنزًا سريًا، ماذا تفعل؟\n1. أشاركه مع أصدقائي\n2. أحتفظ به للمغامرة\n3. أستخدمه لابتكار شيء جديد\n4. أحلل أفضل طريقة للاستفادة منه",
-    "إذا واجهت وحشًا غريبًا في الغابة، كيف تتصرف؟\n1. أتعامل معه بروح مرحة\n2. أبتكر خطة للتغلب عليه\n3. أهاجمه بحذر\n4. أراقب وأتعلم منه",
-    "إذا كان بإمكانك التحليق في السماء، ماذا تختار؟\n1. الطيران مع أصدقائي\n2. الاستكشاف والتجوال\n3. رسم مسارات إبداعية\n4. الاستمتاع بالهدوء والسكينة",
-    "إذا تلقيت رسالة سرية من مجهول، ماذا تفعل؟\n1. أشاركها مع الجميع\n2. أحاول حل اللغز\n3. أصنع مشروعًا مرتبطًا بها\n4. أحتفظ بها وأستمتع بالغموض",
-    "إذا فاز صديقك في تحدي غريب، كيف تحتفل؟\n1. أرقص وأهتف معه\n2. أصفق بطريقة مبتكرة\n3. أخطط لمغامرة جديدة\n4. أشارك الفرح بهدوء",
-    "إذا وجدت كتابًا سحريًا، ماذا تختار؟\n1. أقرأه مع أصدقائي\n2. أستكشف أسراره وأغامر\n3. أستخدمه لصنع أشياء مبتكرة\n4. أستمتع بالهدوء والتأمل"
-]
-personal_game_id = "personal_game"
-personal_game_sessions = {}
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -76,6 +60,7 @@ def callback():
 def calculate_personality(user_answers: typing.List[int], game_id: str) -> str:
     scores = {k: 0 for k in personality_descriptions.keys()}
     weights = game_weights.get(game_id, [])
+
     for i, ans in enumerate(user_answers):
         if i >= len(weights):
             continue
@@ -83,8 +68,10 @@ def calculate_personality(user_answers: typing.List[int], game_id: str) -> str:
         for key, val in weight.items():
             if key in scores:
                 scores[key] += val
+
     if all(v == 0 for v in scores.values()):
         return list(scores.keys())[0]
+
     return max(scores, key=scores.get)
 
 # تنسيق السؤال
@@ -120,7 +107,7 @@ def handle_message(event):
             "تحدي  → عرض تحدي\n"
             "اعتراف → عرض اعتراف\n"
             "شخصي  → عرض سؤال شخصي\n"
-            "لعبه  → بدء اللعبة الشخصية مباشرة"
+            "لعبه  → بدء لعبة تحليل الشخصية\n"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
@@ -135,49 +122,34 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
         return
 
-    # بدء اللعبة الشخصية
+    # بدء لعبة تحليل الشخصية
     if text == "لعبه":
-        personal_game_sessions[user_id] = {"step":0,"answers":[],"questions":personal_game_questions, "game": personal_game_id}
-        q_text = format_question(0, personal_game_questions[0])
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
+        # جميع الأسئلة من games_data["personal_game"]
+        sessions[user_id] = {"step":0,"answers":[],"questions":games_data["personal_game"]}
+        first_q = format_question(0, games_data["personal_game"][0])
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{first_q}"))
         return
 
-    # الرد على أسئلة اللعبة الشخصية
-    if user_id in personal_game_sessions:
-        session = personal_game_sessions[user_id]
-        if text_conv not in ["1","2","3","4"]:
-            return
-        session["answers"].append(int(text_conv))
-        step = session["step"]
-        session["step"] += 1
-
-        if session["step"] >= len(session["questions"]):
-            trait = calculate_personality(session["answers"], session.get("game","default"))
-            desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
-            ))
-            del personal_game_sessions[user_id]
-            return
-
-        # السؤال التالي
-        next_q = format_question(session["step"], session["questions"][session["step"]])
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_q}"))
-        return
-
-    # الرد على الأسئلة العامة الفردية (كما كانت)
+    # الرد على أسئلة اللعبة الفردية
     if user_id in sessions:
         session = sessions[user_id]
         if text_conv not in ["1","2","3","4"]:
             return
         session["answers"].append(int(text_conv))
-        step = session["step"]
-        session["step"] += 1
-        if session["step"] < len(session["questions"]):
-            next_q = session["questions"][session["step"]]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_q}"))
-        else:
+
+        # إذا كانت هذه الإجابة الأخيرة
+        if len(session["answers"]) >= len(session["questions"]):
+            trait = calculate_personality(session["answers"], "personal_game")
+            desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك ({trait}):\n{desc}"
+            ))
             del sessions[user_id]
+            return
+
+        # إرسال السؤال التالي
+        next_q = format_question(len(session["answers"]), session["questions"][len(session["answers"])])
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{next_q}"))
         return
 
 if __name__ == "__main__":
