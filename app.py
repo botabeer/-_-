@@ -1,3 +1,4 @@
+import random
 from flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -14,7 +15,6 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# دوال التحميل
 def load_file_lines(filename: str) -> typing.List[str]:
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -40,8 +40,6 @@ personality_descriptions = load_json_file("characters.txt")
 
 # جلسات اللاعبين
 sessions = {}
-
-# تتبع الأسئلة العامة
 general_indices = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
 
 @app.route("/callback", methods=["POST"])
@@ -56,9 +54,8 @@ def callback():
         print(f"Webhook exception: {e}")
     return "OK", 200
 
-# حساب الشخصية
 def calculate_personality(user_answers: typing.List[int]) -> str:
-    scores = game_weights.copy()  # يحتوي على جميع الشخصيات بصفر
+    scores = game_weights.copy()
     for i, ans in enumerate(user_answers):
         weight = games_data["game"][i]["answers"].get(str(ans), {}).get("weight", {})
         for key, val in weight.items():
@@ -66,7 +63,6 @@ def calculate_personality(user_answers: typing.List[int]) -> str:
                 scores[key] += val
     return max(scores, key=scores.get)
 
-# تنسيق السؤال
 def format_question(index:int, question_data: dict) -> str:
     q_text = question_data["question"]
     options = []
@@ -76,7 +72,6 @@ def format_question(index:int, question_data: dict) -> str:
     options_text = "\n".join(options)
     return f"السؤال {index+1}:\n{q_text}\n{options_text}"
 
-# الحصول على الأسئلة العامة بدون تكرار
 def get_next_general_question(qtype:str) -> str:
     qlist = {"سؤال": questions, "تحدي": challenges, "اعتراف": confessions, "شخصي": personal_questions}.get(qtype, [])
     if not qlist:
@@ -90,11 +85,9 @@ def handle_message(event):
     text = event.message.text.strip()
     user_id = event.source.user_id
     display_name = line_bot_api.get_profile(user_id).display_name
-
     arabic_to_english = {"١":"1","٢":"2","٣":"3","٤":"4"}
     text_conv = arabic_to_english.get(text,text)
 
-    # أمر المساعدة
     if text == "مساعدة":
         reply = (
             "أوامر البوت:\n\n"
@@ -107,7 +100,6 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # الأسئلة العامة
     if text in ["سؤال","تحدي","اعتراف","شخصي"]:
         q_text = get_next_general_question(text)
         if not q_text:
@@ -117,18 +109,18 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{q_text}"))
         return
 
-    # بدء لعبة
     if text == "لعبه":
+        shuffled_questions = games_data["game"][:]
+        random.shuffle(shuffled_questions)
         sessions[user_id] = {
             "step": 0,
             "answers": [],
-            "questions": games_data["game"]
+            "questions": shuffled_questions
         }
         question_text = format_question(0, sessions[user_id]["questions"][0])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{display_name}\n\n{question_text}"))
         return
 
-    # الرد على أسئلة اللعبة
     if user_id in sessions and "questions" in sessions[user_id]:
         session = sessions[user_id]
         if text_conv not in ["1","2","3","4"]:
@@ -136,24 +128,19 @@ def handle_message(event):
         session["answers"].append(int(text_conv))
         step = session["step"]
 
-        # بعد كل 5 أسئلة إعطاء التحليل المؤقت
-        if (step + 1) % 5 == 0:
+        # بعد كل سؤال خامس، عرض تحليل مؤقت
+        if (step+1) % 5 == 0:
             trait = calculate_personality(session["answers"])
             desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                text=f"{display_name}\nتحليل مؤقت للشخصية ({trait}):\n{desc}"
+                text=f"{display_name}\n\nتحليل مؤقت للشخصية بعد {step+1} أسئلة ({trait}):\n{desc}"
             ))
 
-        # الانتقال للسؤال التالي
+        # إرسال السؤال التالي
         session["step"] += 1
-
-        # إذا وصلنا لآخر سؤال نعيد من البداية
         if session["step"] >= len(session["questions"]):
-            trait = calculate_personality(session["answers"])
-            desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                text=f"{display_name}\n\nتم الانتهاء من اللعبة.\nتحليل شخصيتك النهائي ({trait}):\n{desc}\n\nتمت إعادة اللعبة من البداية."
-            ))
+            # إعادة ترتيب الأسئلة عشوائيًا لتجنب التكرار
+            random.shuffle(session["questions"])
             session["step"] = 0
             session["answers"] = []
 
