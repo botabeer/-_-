@@ -133,7 +133,7 @@ def handle_message(event):
             trait = calculate_personality(session["answers"])
             desc = personality_descriptions.get(trait,"وصف الشخصية غير متوفر.")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                text=f"{display_name}\n\nتحليل مؤقت للشخصية بعد {step+1} أسئلة ({trait}):\n{desc}"
+                text=f"{display_name}\n\nتحليل الشخصية بعد {step+1} أسئلة ({trait}):\n{desc}"
             ))
 
         # إرسال السؤال التالي
